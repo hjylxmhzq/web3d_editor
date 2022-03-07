@@ -1,0 +1,37 @@
+{
+    "name": "web3d_editor_server",
+    "version": "0.0.1",
+    "main": "dist/index.js",
+    "author": "tonywho",
+    "license": "MIT",
+    "scripts": {
+      "build:watch": "rimraf dist && tsc --watch",
+      "start:watch": "nodemon ./dist/index.js",
+      "dev": "concurrently \"yarn build:watch\" \"yarn start:watch\""
+    },
+    "dependencies": {
+      "@koa/cors": "^3.1.0",
+      "@koa/router": "^10.1.1",
+      "fs-extra": "^10.0.0",
+      "koa": "^2.13.4",
+      "koa-body": "^4.2.0",
+      "koa-static": "^5.0.0",
+      "three": "^0.136.0",
+      "uuid": "^8.3.2"
+    },
+    "devDependencies": {
+      "@types/fs-extra": "^9.0.13",
+      "@types/koa": "^2.13.4",
+      "@types/koa-static": "^4.0.2",
+      "@types/koa__cors": "^3.1.1",
+      "@types/koa__router": "^8.0.11",
+      "@types/node": "^17.0.8",
+      "@types/three": "^0.136.1",
+      "@types/uuid": "^8.3.4",
+      "concurrently": "^7.0.0",
+      "nodemon": "^2.0.15",
+      "rimraf": "^3.0.2",
+      "typescript": "^4.5.4"
+    }
+  }
+  

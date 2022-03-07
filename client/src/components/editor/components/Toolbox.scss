@@ -1,0 +1,60 @@
+.toolbox-container {
+    width: 100%;
+    height: 100%;
+}
+
+.toolbox-title {
+    background-color: #aaa;
+    font-size: 16px;
+}
+
+.toolbox-body {
+    padding: 10px;
+    background-color: #eee;
+}
+
+.toolbox-folder {
+    margin: 5px 0;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    background-color: #eee;
+    width: 100%;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.toolbox-outfolder-title {
+    font-weight: 500;
+}
+
+.toolbox-outfolder {
+    box-shadow: 1px 1px 7px 0 #9b97978c;
+    padding: 1px 5px;
+    margin: 5px 0;
+}
+
+.toolbox-texture-img {
+    & > img {
+        width: 100%;
+        height: 100%;
+    }
+
+    & > span {
+        position: absolute;
+        right: 2px;
+        top: 2px;
+        line-height: 1;
+        width: 20px;
+        background-color: #ffffff73;
+        height: 20px;
+        display: flex;
+        border-radius: 50%;
+        align-items: center;
+        justify-content: center;
+    }
+
+    position: relative;
+    width: 48%;
+    height: 65px;
+}
