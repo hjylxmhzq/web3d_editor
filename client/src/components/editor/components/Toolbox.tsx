@@ -56,6 +56,8 @@ export default function Toolbox() {
       let _5 = sceneSettings.paint;
       let { roughness, metalness } = sceneSettings.paint;
       let _7 = sceneSettings.scene;
+      let { x, y, z, type } = sceneSettings.transform;
+      let _8 = sceneSettings.transform.type;
 
     }, () => {
 
@@ -72,6 +74,7 @@ export default function Toolbox() {
         }
 
       }
+
       update();
 
     });
@@ -95,11 +98,8 @@ export default function Toolbox() {
 
     function copyCanvas() {
 
-      if (sceneSettings.currentTool === 'paint') {
-
-        ctx?.drawImage(cvs, 0, 0, 170, 100);
-
-      }
+      ctx?.clearRect(0, 0, 170, 100);
+      ctx?.drawImage(cvs, 0, 0, 170, 100);
 
       requestAnimationFrame(copyCanvas);
 
@@ -154,6 +154,7 @@ export default function Toolbox() {
           <Radio.Button style={{ width: '33%', textAlign: 'center' }} value="move">Move</Radio.Button>
           <Radio.Button style={{ width: '33%', textAlign: 'center' }} value="edit">Edit</Radio.Button>
           <Radio.Button style={{ width: '33%', textAlign: 'center' }} value="paint">Paint</Radio.Button>
+          <Radio.Button style={{ width: '33%', textAlign: 'center' }} value="create">Object</Radio.Button>
         </Radio.Group>
       </div>
 
@@ -167,6 +168,111 @@ export default function Toolbox() {
         </div>
       </div>
 
+      <div className='toolbox-outfolder'>
+        <div className='toolbox-outfolder-title'>Mesh Information</div>
+        <div className='toolbox-folder'>
+          <span>World X:</span>
+          <input
+            type='number'
+            onChange={e => sceneSettings.transform.x = parseFloat(e.target.value)}
+            value={sceneSettings.transform.x}
+            style={{
+              width: 100,
+              height: 25,
+              border: 'none'
+            }} />
+        </div>
+        <div className='toolbox-folder'>
+          <span>World Y:</span>
+          <input
+            type='number'
+            onChange={e => sceneSettings.transform.y = parseFloat(e.target.value)}
+            value={sceneSettings.transform.y}
+            style={{
+              width: 100,
+              height: 25,
+              border: 'none'
+            }} />
+        </div>
+        <div className='toolbox-folder'>
+          <span>World Z:</span>
+          <input
+            type='number'
+            onChange={e => sceneSettings.transform.z = parseFloat(e.target.value)}
+            value={sceneSettings.transform.z}
+            style={{
+              width: 100,
+              height: 25,
+              border: 'none'
+            }} />
+        </div>
+      </div>
+
+      {
+        mode === 'create' &&
+        <>
+          <div className='toolbox-outfolder'>
+            <div className='toolbox-outfolder-title'>Geometry Pools</div>
+            <div className='toolbox-folder'>
+              {
+                ['sphere', 'box', 'plane'].map(geo => {
+                  return <Button
+                    size='small'
+                    style={{ width: '49%' }}
+                    key={geo}
+                    onClick={e => {
+                      sceneSettings.action.createGeometry = '';
+                      sceneSettings.action.createGeometry = geo;
+                    }}>
+                    {geo}
+                  </Button>
+                })
+              }
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.deleteGeometry++}>Delete Geometry</Button>
+            </div>
+          </div>
+
+          <div className='toolbox-outfolder'>
+            <div className='toolbox-outfolder-title'>Mesh Tools</div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.subdivision++}>Subdivision</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.simplification++}>Simplification</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.mergeGeometries++}>Merge Seleted</Button>
+            </div>
+          </div>
+
+          <div className='toolbox-outfolder'>
+            <div className='toolbox-outfolder-title'>CSG Tools</div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.unionGeometries++}>Union</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.unionGeometries++}>Intersect</Button>
+            </div>
+          </div>
+        </>
+      }
+      {
+        mode === 'move' &&
+        <div className='toolbox-outfolder'>
+          <div className='toolbox-outfolder-title'>Transform Options</div>
+          <div className='toolbox-folder'>
+            <Select
+              size='small'
+              defaultValue="translate" style={{ width: '100%' }} onChange={v => sceneSettings.transform.type = v}>
+              <Option value="translate">Translate</Option>
+              <Option value="rotate">Rotate</Option>
+              <Option value="scale">Scale</Option>
+            </Select>
+          </div>
+        </div>
+      }
       {
         mode === 'paint' &&
         <div className='toolbox-outfolder'>
@@ -244,6 +350,12 @@ export default function Toolbox() {
           </div>
         </div>
       }
+
+      <div className='toolbox-outfolder'>
+        <div className='toolbox-outfolder-title'>Texture Preview</div>
+        <canvas ref={canvasRef} width='170px' height='100px' style={{ backgroundColor: '#afafaf', width: '100%' }} />
+      </div>
+
       {
         mode === 'edit' &&
         <div className='toolbox-outfolder'>
@@ -318,6 +430,9 @@ export default function Toolbox() {
           <span>Enable Shadow</span><Switch defaultChecked={sceneSettings.scene.castShadow} size='small' onChange={checked => sceneSettings.scene.castShadow = checked} />
         </div>
         <div className='toolbox-folder'>
+          <span>Direction Light</span><Switch defaultChecked={sceneSettings.scene.showLightHelper} size='small' onChange={checked => sceneSettings.scene.directionLight = checked} />
+        </div>
+        <div className='toolbox-folder'>
           <span>Light Helper</span><Switch defaultChecked={sceneSettings.scene.showLightHelper} size='small' onChange={checked => sceneSettings.scene.showLightHelper = checked} />
         </div>
         <div className='toolbox-folder'>
@@ -360,20 +475,7 @@ export default function Toolbox() {
         </div>
       </div>
 
-      <div className='toolbox-outfolder'>
-        <div className='toolbox-outfolder-title'>Geometry Options</div>
-        <div className='toolbox-folder'>
-          <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.subdivision++}>Subdivision</Button>
-        </div>
-        <div className='toolbox-folder'>
-          <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.simplification++}>Simplification</Button>
-        </div>
-      </div>
-      <div className='toolbox-outfolder' style={{ display: canvasVisible ? 'block' : 'none' }}>
-        <div className='toolbox-outfolder-title'>Texture Preview</div>
-        <canvas ref={canvasRef} width='170px' height='100px' style={{ backgroundColor: '#afafaf', width: '100%' }} />
-      </div>
     </div>
-  </div>
+  </div >
 }
 

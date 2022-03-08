@@ -76,6 +76,15 @@ const sceneSettings = {
         metalness: 0.5,
         roughness: 0.5,
     },
+    transform: {
+        x: 0,
+        y: 0,
+        z: 0,
+        localX: 0,
+        localY: 0,
+        localZ: 0,
+        type: 'translate',
+    },
     saveSceneTo3DTiles: 0,
     global: {
         simplification: 1,
@@ -93,6 +102,11 @@ const sceneSettings = {
         importTexture: 1,
         loadTexturesInScene: 1,
         applyTexture: '',
+        createGeometry: '',
+        deleteGeometry: 1,
+        mergeGeometries: 1,
+        unionGeometries: 1,
+        intersectGeometries: 1,
     },
     scene: {
         castShadow: true,
@@ -106,11 +120,14 @@ const sceneSettings = {
         showLightHelper: false,
         backgroundColor: 0xffffff,
         liveSelect: false,
+        directionLight: false,
     }
 }
 
 export type SceneSetting = typeof sceneSettings;
 
 const sceneSettingsReactive: typeof sceneSettings = makeReactive(sceneSettings);
+
+(window as any).sceneSettings = sceneSettings;
 
 export { sceneSettingsReactive as sceneSettings };

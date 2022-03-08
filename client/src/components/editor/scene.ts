@@ -1,7 +1,7 @@
 import { SceneInfo } from './index';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
-import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture } from 'three';
+import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide } from 'three';
 import EventEmitter from 'events';
 import { CustomTransformControls } from '../Scene/CustomTransformControls';
 import { FlyOrbitControls } from '../Scene/FlyOrbitControls';
@@ -17,7 +17,7 @@ import { mergeBufferGeometries } from 'three/examples/jsm/utils/BufferGeometryUt
 import { saveToLocal, TilesGenerator } from './utils/gen3dtiles';
 import { generateUUID } from 'three/src/math/MathUtils';
 import { MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree, MeshBVHVisualizer, SplitStrategy, SAH, CENTER, AVERAGE } from 'three-mesh-bvh';
-import { createMeshEdge, GeometryOperator, mergeMeshesInGroup } from './utils/GeometryUtils';
+import { createMeshEdge, GeometryOperator, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
 import { debounce, normalizeMousePosition } from './utils/common';
 import { SubdivisionModifier } from './utils/SubdivisionModifier';
 import { createBrushHelper, performStroke, StrokeParameter } from './utils/sculptTools';
@@ -31,6 +31,9 @@ import { MaterialStaticUtils } from './utils/MaterialUtils';
 import { disableShadow, enableShadow, raycastMesh } from './utils/SceneUtils';
 import { loadFile } from './utils/Files';
 import { sceneStorage } from './store';
+import { SelectionBoxHelper } from './utils/SelectBoxHelper';
+import { rectCast } from './utils/rectCast';
+import { CSG } from 'three-csg-ts';
 
 const saveBtn = document.createElement('button');
 
@@ -49,8 +52,8 @@ const _v0 = new Vector3();
 const _m0 = new Matrix4();
 const _identityM4 = new Matrix4().identity();
 
-const seletedMeshRef: { current: undefined | Mesh } = { current: undefined };
-const seletedMeshSet: Set<Mesh> = new Set();
+const selectedMeshRef: { current: undefined | Mesh } = { current: undefined };
+const selectedMeshSet: Set<Mesh> = new Set();
 
 const raycaster = new Raycaster();
 
@@ -112,11 +115,11 @@ export async function scene(si: SceneInfo) {
     console.log(o, n)
     if (o !== n) {
 
-      if (seletedMeshRef.current) {
+      if (selectedMeshRef.current) {
 
-        const newGeo = subdivitionModifier.modify(seletedMeshRef.current.geometry);
+        const newGeo = subdivitionModifier.modify(selectedMeshRef.current.geometry);
 
-        seletedMeshRef.current.geometry = newGeo;
+        selectedMeshRef.current.geometry = newGeo;
 
         updateBVHHelper();
 
@@ -147,11 +150,35 @@ export async function scene(si: SceneInfo) {
 
   });
 
+  observe(() => sceneSettings.action.unionGeometries, (o, n) => {
+    if (o !== n) {
+      if (selectedMeshSet.size > 1) {
+        const meshes = Array.from(selectedMeshSet).filter(m => m.geometry.getAttribute('position'));
+        const newMesh = CSG.union(meshes[0], meshes[1]);
+        MaterialStaticUtils.getAllMaterial(newMesh).forEach(m => {
+          if (m instanceof MeshStandardMaterial) {
+            m.flatShading = true;
+          }
+        });
+        group.add(newMesh);
+        octree.add(newMesh);
+      }
+    }
+  });
+
+  observe(() => sceneSettings.action.intersectGeometries, (o, n) => {
+    if (o !== n) {
+      if (selectedMeshSet.size) {
+        
+      }
+    }
+  });
+
   observe(() => sceneSettings.global.simplification, (o, n) => {
     if (o !== n) {
-      if (seletedMeshRef.current) {
-        const newGeo = simplifyMesh(seletedMeshRef.current.geometry, 0.1, true);
-        seletedMeshRef.current.geometry = newGeo;
+      if (selectedMeshRef.current) {
+        const newGeo = simplifyMesh(selectedMeshRef.current.geometry, 0.1, true);
+        selectedMeshRef.current.geometry = newGeo;
         updateBVHHelper();
         updateMeshEdge();
       }
@@ -160,7 +187,7 @@ export async function scene(si: SceneInfo) {
 
   observe(() => sceneSettings.global.meshEdgeDepthTest, (o, n) => {
     if (o !== n) {
-      if (seletedMeshRef.current) {
+      if (selectedMeshRef.current) {
         updateMeshEdge();
       }
     }
@@ -170,6 +197,11 @@ export async function scene(si: SceneInfo) {
     const file = await loadFile('.glb');
     const url = URL.createObjectURL(file);
     const model = await loadGltf(scene, url);
+    model.traverse(obj => {
+      if (obj instanceof Mesh) {
+        octree.add(obj);
+      }
+    });
     group.add(model);
   });
 
@@ -177,12 +209,87 @@ export async function scene(si: SceneInfo) {
     await MaterialStaticUtils.collectTextures(group);
   });
 
+  observe(() => sceneSettings.action.deleteGeometry, async (o, n) => {
+    if (selectedMeshRef.current) {
+      octree.remove(selectedMeshRef.current);
+      selectedMeshRef.current.parent?.remove(selectedMeshRef.current);
+      selectedMeshRef.current = undefined;
+      boxHelperGroup.clear();
+      bvhHelperGroup.clear();
+      meshEdgeHelperGroup.clear();
+      transformControl.detach();
+    }
+    if (selectedMeshSet.size) {
+      selectedMeshSet.forEach(mesh => {
+        octree.remove(mesh);
+        mesh.parent?.remove(mesh);
+        boxHelperGroup.clear();
+        bvhHelperGroup.clear();
+        meshEdgeHelperGroup.clear();
+        transformControl.detach();
+      });
+    }
+  });
+
+  observe(() => sceneSettings.action.createGeometry, async (o, n) => {
+
+    function updatePosition(mesh: Mesh) {
+      const position = new Vector3();
+      const direction = new Vector3();
+
+      camera.getWorldDirection(direction);
+      camera.getWorldPosition(position);
+      position.add(direction.multiplyScalar(10));
+      mesh.position.copy(position);
+    }
+    const material = new MeshStandardMaterial();
+    const mesh = new Mesh(undefined, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    updatePosition(mesh);
+
+    if (sceneSettings.action.createGeometry === 'sphere') {
+      const sphere = new SphereBufferGeometry(2, 50, 50);
+      mesh.geometry = sphere;
+    } else if (sceneSettings.action.createGeometry === 'box') {
+      const box = new BoxBufferGeometry(2, 2, 2, 5, 5);
+      mesh.geometry = box;
+    } else if (sceneSettings.action.createGeometry === 'plane') {
+      const plane = new PlaneBufferGeometry(20, 20, 20, 20);
+      material.side = DoubleSide;
+      mesh.geometry = plane;
+      mesh.rotateX(-0.5 * Math.PI);
+      mesh.updateMatrixWorld();
+    }
+
+    octree.add(mesh);
+    group.add(mesh);
+
+  });
+
+  observe(() => { let { x, y, z } = sceneSettings.transform }, async (o, n) => {
+    if (selectedMeshRef.current && !transforming) {
+      const { x, y, z, type } = sceneSettings.transform;
+      selectedMeshRef.current.position.set(x, y, z);
+      refitMeshEdge();
+      transformControl.setMode(type);
+    }
+  });
+
+  observe(() => { let _ = sceneSettings.transform.type }, async (o, n) => {
+    if (selectedMeshRef.current && !transforming) {
+      const type = sceneSettings.transform.type;
+      transformControl.setMode(type);
+      refitMeshEdge();
+    }
+  });
+
   observe(() => {
     let { roughness, metalness } = sceneSettings.paint
   }, async (o, n) => {
-    if (seletedMeshRef.current) {
+    if (selectedMeshRef.current) {
       let { roughness, metalness } = sceneSettings.paint
-      const material = MaterialStaticUtils.getAllMaterial(seletedMeshRef.current);
+      const material = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
       for (let m of material) {
         if (m instanceof MeshStandardMaterial) {
           m.metalness = metalness;
@@ -193,30 +300,49 @@ export async function scene(si: SceneInfo) {
   });
 
   observe(() => sceneSettings.action.applyTexture, async (o, n) => {
-    if (!seletedMeshRef.current) {
+    if (!selectedMeshRef.current) {
 
       return;
 
     }
 
+    let material = MaterialStaticUtils.getFirstMaterial(selectedMeshRef.current);
     const textureImg = await sceneStorage.getTextureImage(sceneSettings.action.applyTexture);
     const texture = sceneStorage.getTexture(sceneSettings.action.applyTexture);
 
+    if (!material) {
+
+      material = selectedMeshRef.current.material = new MeshStandardMaterial();
+
+    }
+
+    if (!material.map) {
+
+      const m = MaterialStaticUtils.getFirstMaterial(selectedMeshRef.current);
+      material.map = new Texture();
+      material.needsUpdate = true;
+
+    }
+
     if (texture && textureImg) {
 
-      const { naturalWidth: w, naturalHeight: h } = textureImg;
+      const {naturalWidth: w, naturalHeight: h} = textureImg;
+
       const cvs = getCanvas(w, h);
       const ctx = cvs.getContext('2d');
+
       if (ctx) {
 
         ctx.drawImage(textureImg, 0, 0, w, h);
+
         const imgBitMap = await createImageBitmap(cvs);
 
-        const mList = MaterialStaticUtils.getAllMaterial(seletedMeshRef.current);
+        const mList = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
 
         if (texture.type === 'albedo') {
 
-          const t = MaterialStaticUtils.getTexture(seletedMeshRef.current);
+          const t = MaterialStaticUtils.getTexture(selectedMeshRef.current);
+
           if (t) {
             t.image = imgBitMap;
             t.needsUpdate = true;
@@ -305,6 +431,7 @@ export async function scene(si: SceneInfo) {
 
   });
 
+  let editingMeshes = [];
   let helperGroup = new Group();
   let meshEdgeHelperGroup = new Group();
   let bvhHelperGroup = new Group();
@@ -340,6 +467,8 @@ export async function scene(si: SceneInfo) {
 
   const subdivitionModifier = new SubdivisionModifier(1);
 
+  const selectBoxHelper = SelectionBoxHelper.getinstance(renderer.domElement, 'selection-box-helper');
+
   function renderLoop() {
     requestAnimationFrame(renderLoop);
     renderer.render(scene, camera);
@@ -369,6 +498,7 @@ export async function scene(si: SceneInfo) {
   });
 
   const transformControl = new CustomTransformControls(camera, renderer.domElement);
+  transformControl.setMode(sceneSettings.transform.type);
   onTransform(transformControl, octree);
 
   scene.add(transformControl);
@@ -376,10 +506,10 @@ export async function scene(si: SceneInfo) {
 
   function updateMeshEdge() {
 
-    if (seletedMeshRef.current && sceneSettings.global.showMeshEdge) {
+    if (selectedMeshRef.current && sceneSettings.global.showMeshEdge) {
 
       meshEdgeHelperGroup.clear();
-      meshEdgeHelperGroup.add(createMeshEdge(seletedMeshRef.current, sceneSettings.global.meshEdgeDepthTest));
+      meshEdgeHelperGroup.add(createMeshEdge(selectedMeshRef.current, sceneSettings.global.meshEdgeDepthTest));
 
     }
 
@@ -387,7 +517,7 @@ export async function scene(si: SceneInfo) {
 
   function updateBVHHelper(refit = false) {
 
-    if (!seletedMeshRef.current?.geometry.boundsTree || !sceneSettings.global.showBVHHelper) return;
+    if (!selectedMeshRef.current?.geometry.boundsTree || !sceneSettings.global.showBVHHelper) return;
 
     if (refit) {
 
@@ -400,7 +530,7 @@ export async function scene(si: SceneInfo) {
 
     }
 
-    const bvhVisualizer = new MeshBVHVisualizer(seletedMeshRef.current, sceneSettings.global.BVHHelperDepth);
+    const bvhVisualizer = new MeshBVHVisualizer(selectedMeshRef.current, sceneSettings.global.BVHHelperDepth);
 
     bvhVisualizer.opacity = 0.8;
     bvhVisualizer.depth = sceneSettings.global.BVHHelperDepth;
@@ -415,7 +545,7 @@ export async function scene(si: SceneInfo) {
 
     bvhHelperGroup.add(bvhVisualizer);
 
-    bvhHelperGroup.applyMatrix4(seletedMeshRef.current.matrixWorld);
+    bvhHelperGroup.applyMatrix4(selectedMeshRef.current.matrixWorld);
 
     console.log(bvhVisualizer)
 
@@ -425,15 +555,38 @@ export async function scene(si: SceneInfo) {
 
     boxHelperGroup.clear();
 
+    if (selectedMeshSet.size) {
+
+      selectedMeshSet.forEach((mesh) => {
+
+        if (force || !mesh.geometry.boundingBox) {
+
+          mesh.geometry.computeBoundingBox();
+  
+        }
+
+        const bbox = mesh.geometry.boundingBox?.clone().applyMatrix4(mesh.matrixWorld);
+
+        if (!bbox) return;
+  
+        const boxHelper = new Box3Helper(bbox, new Color('blue'));
+        boxHelperGroup.add(boxHelper);
+
+      });
+
+      return;
+
+    }
+
     if (!sceneSettings.global.showBoundingBox) {
 
       return;
 
     }
 
-    if (seletedMeshRef.current) {
+    if (selectedMeshRef.current) {
 
-      const mesh = seletedMeshRef.current;
+      const mesh = selectedMeshRef.current;
 
       if (force || !mesh.geometry.boundingBox) {
 
@@ -447,25 +600,46 @@ export async function scene(si: SceneInfo) {
 
       const boxHelper = new Box3Helper(bbox, new Color('blue'));
 
-      // boxHelper.applyMatrix4(mesh.matrixWorld);
-
       boxHelperGroup.add(boxHelper);
 
     }
 
   }
 
+  function updateTransformInfo() {
+
+    if (selectedMeshRef.current) {
+      transforming = true;
+      const { x, y, z } = selectedMeshRef.current.position;
+      sceneSettings.transform.x = x;
+      sceneSettings.transform.y = y;
+      sceneSettings.transform.z = z;
+      transforming = false;
+    }
+
+  }
+
+  let transforming = false;
+
   transformControl.addEventListener('mouseDown', (e) => {
 
     flyOrbitControls.enabled = false;
+    transforming = true;
 
   });
 
   transformControl.addEventListener('mouseUp', (e) => {
 
     flyOrbitControls.enabled = true;
+    transforming = false;
     updateMeshEdge();
     updateBoundingBox();
+
+  });
+
+  transformControl.addEventListener('objectChange', (e) => {
+
+    updateTransformInfo();
 
   });
 
@@ -538,6 +712,16 @@ export async function scene(si: SceneInfo) {
 
   });
 
+  customKeyboardEvent.onKey('Alt', (e) => {
+    selectBoxHelper.enabled = true;
+    transformControl.enabled = false;
+    flyOrbitControls.enabled = false;
+  }, (e) => {
+    selectBoxHelper.enabled = false;
+    transformControl.enabled = true;
+    flyOrbitControls.enabled = true;
+  })
+
   customMouseEvent.onMousemove((e) => {
 
     if (sceneSettings.scene.liveSelect) {
@@ -546,11 +730,41 @@ export async function scene(si: SceneInfo) {
 
     }
 
-    const boundsTree = seletedMeshRef.current?.geometry.boundsTree;
+    if (customKeyboardEvent.alt && customMouseEvent.mousedown) {
+
+      const startPoint = new Vector3(selectBoxHelper.startPoint.x, selectBoxHelper.startPoint.y, 0.5);
+      const endPoint = new Vector3(e.clientX, e.clientY, 0.5);
+
+      normalizeMousePosition(startPoint);
+      normalizeMousePosition(endPoint);
+
+      const collection = rectCast(camera, startPoint, endPoint, group);
+
+      if (!customKeyboardEvent.ctrl) {
+
+        selectedMeshSet.clear();
+        
+      }
+
+      for (let mesh of collection) {
+
+        selectedMeshSet.add(mesh);
+
+      }
+      
+      selectedMeshRef.current = undefined;
+
+      updateBoundingBox();
+      
+      return;
+
+    }
+
+    const boundsTree = selectedMeshRef.current?.geometry.boundsTree;
 
     if (sceneSettings.currentTool === 'sculpt' || sceneSettings.currentTool === 'paint') {
 
-      if (boundsTree && seletedMeshRef.current) {
+      if (boundsTree && selectedMeshRef.current) {
 
         const { clientX: x, clientY: y } = e;
 
@@ -562,7 +776,7 @@ export async function scene(si: SceneInfo) {
 
         const invMat = new Matrix4();
 
-        invMat.copy(seletedMeshRef.current.matrixWorld).invert();
+        invMat.copy(selectedMeshRef.current.matrixWorld).invert();
 
         const ray = raycaster.ray.clone();
 
@@ -580,7 +794,7 @@ export async function scene(si: SceneInfo) {
 
             const hitFirst = hit[0];
 
-            _v0.copy(hitFirst.point).applyMatrix4(seletedMeshRef.current.matrixWorld);
+            _v0.copy(hitFirst.point).applyMatrix4(selectedMeshRef.current.matrixWorld);
 
             brushHelper.position.copy(_v0);
 
@@ -597,7 +811,7 @@ export async function scene(si: SceneInfo) {
 
               };
 
-              performStroke(boundsTree, _v0, seletedMeshRef.current, brushHelper, false, sets, sceneSettings.sculpt);
+              performStroke(boundsTree, _v0, selectedMeshRef.current, brushHelper, false, sets, sceneSettings.sculpt);
 
               meshEdgeHelperGroup.clear();
               updateMeshEdge();
@@ -605,7 +819,7 @@ export async function scene(si: SceneInfo) {
 
             } else {
 
-              performStroke(boundsTree, _v0, seletedMeshRef.current, brushHelper, true, {}, sceneSettings.sculpt);
+              performStroke(boundsTree, _v0, selectedMeshRef.current, brushHelper, true, {}, sceneSettings.sculpt);
 
             }
 
@@ -617,7 +831,7 @@ export async function scene(si: SceneInfo) {
 
             const hitFirst = hit[0];
 
-            _v0.copy(hitFirst.point).applyMatrix4(seletedMeshRef.current.matrixWorld);
+            _v0.copy(hitFirst.point).applyMatrix4(selectedMeshRef.current.matrixWorld);
 
             const face = hitFirst.face;
 
@@ -638,11 +852,11 @@ export async function scene(si: SceneInfo) {
 
               if (sceneSettings.paint.verticeColor) {
 
-                performPaint(boundsTree, _v0, seletedMeshRef.current, paintBrushHelper, sceneSettings.paint);
+                performPaint(boundsTree, _v0, selectedMeshRef.current, paintBrushHelper, sceneSettings.paint);
 
               } else if (face) {
 
-                performPaintOnPoint(_v0, face, seletedMeshRef.current, sceneSettings.paint);
+                performPaintOnPoint(_v0, face, selectedMeshRef.current, sceneSettings.paint);
 
               }
 
@@ -660,6 +874,14 @@ export async function scene(si: SceneInfo) {
   });
 
   function updateSeletedMesh(e: MouseEvent) {
+
+    if (selectedMeshSet.size) {
+
+      selectedMeshSet.clear();
+
+      updateBoundingBox();
+
+    }
 
     const { clientX: x, clientY: y } = e;
 
@@ -681,36 +903,37 @@ export async function scene(si: SceneInfo) {
 
       const firstCast = intersects[0].object;
 
-      if (firstCast !== seletedMeshRef.current) {
+      if (firstCast !== selectedMeshRef.current) {
 
-        if (seletedMeshRef.current?.geometry.boundsTree) {
+        if (selectedMeshRef.current?.geometry.boundsTree) {
 
-          seletedMeshRef.current.geometry.boundsTree = undefined;
+          selectedMeshRef.current.geometry.boundsTree = undefined;
 
         }
 
         if (customKeyboardEvent.ctrl) {
 
-          seletedMeshSet.add(firstCast as Mesh);
+          selectedMeshSet.add(firstCast as Mesh);
 
         } else {
 
-          seletedMeshSet.clear();
+          selectedMeshSet.clear();
 
         }
 
         console.log(firstCast);
 
-        seletedMeshRef.current = firstCast as Mesh;
+        selectedMeshRef.current = firstCast as Mesh;
 
-        seletedMeshRef.current.updateMatrixWorld();
+        selectedMeshRef.current.updateMatrixWorld();
 
-        const texture = MaterialStaticUtils.getTexture(seletedMeshRef.current);
+        updateTransformInfo();
 
-        const material = MaterialStaticUtils.getAllMaterial(seletedMeshRef.current);
+        const texture = MaterialStaticUtils.getTexture(selectedMeshRef.current);
+
+        const material = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
 
         if (material.length) {
-
 
           for (let m of material) {
 
@@ -749,11 +972,11 @@ export async function scene(si: SceneInfo) {
 
         updateBoundingBox();
 
-        const boundsTree = new MeshBVH(seletedMeshRef.current.geometry, {
+        const boundsTree = new MeshBVH(selectedMeshRef.current.geometry, {
           strategy: CENTER
         });
 
-        seletedMeshRef.current.geometry.boundsTree = boundsTree;
+        selectedMeshRef.current.geometry.boundsTree = boundsTree;
 
         if (sceneSettings.global.showBVHHelper) {
 
@@ -770,13 +993,13 @@ export async function scene(si: SceneInfo) {
 
     } else {
 
-      if (seletedMeshRef.current?.geometry.boundsTree) {
+      if (selectedMeshRef.current?.geometry.boundsTree) {
 
-        seletedMeshRef.current.geometry.boundsTree = undefined;
+        selectedMeshRef.current.geometry.boundsTree = undefined;
 
       }
 
-      seletedMeshRef.current = undefined;
+      selectedMeshRef.current = undefined;
       transformControl.detach();
       flyOrbitControls.enabled = true;
       brushHelper.visible = false;
@@ -786,13 +1009,13 @@ export async function scene(si: SceneInfo) {
 
     }
 
-    const boundsTree = seletedMeshRef.current.geometry.boundsTree;
+    const boundsTree = selectedMeshRef.current.geometry.boundsTree;
 
-    if (boundsTree && seletedMeshRef.current) {
+    if (boundsTree && selectedMeshRef.current) {
 
       const invMat = new Matrix4();
 
-      invMat.copy(seletedMeshRef.current.matrixWorld).invert();
+      invMat.copy(selectedMeshRef.current.matrixWorld).invert();
 
       const ray = raycaster.ray.clone();
 
@@ -814,7 +1037,7 @@ export async function scene(si: SceneInfo) {
 
         if (intersection.faceIndex && intersection.face) {
 
-          const go = new GeometryOperator(seletedMeshRef.current.geometry);
+          const go = new GeometryOperator(selectedMeshRef.current.geometry);
 
           if (sceneSettings.currentTool === 'addvertex') {
 
@@ -831,7 +1054,7 @@ export async function scene(si: SceneInfo) {
           } else if (sceneSettings.currentTool === 'move') {
 
             transformControl.detach();
-            transformControl.attach(seletedMeshRef.current);
+            transformControl.attach(selectedMeshRef.current);
 
           }
 
@@ -841,12 +1064,12 @@ export async function scene(si: SceneInfo) {
 
           const newGeo = go.rebuild();
 
-          seletedMeshRef.current.geometry = newGeo;
+          selectedMeshRef.current.geometry = newGeo;
 
           meshEdgeHelperGroup.clear();
 
 
-          seletedMeshRef.current.geometry.boundsTree = new MeshBVH(newGeo, { strategy: CENTER });
+          selectedMeshRef.current.geometry.boundsTree = new MeshBVH(newGeo, { strategy: CENTER });
 
           updateMeshEdge();
 
@@ -869,7 +1092,7 @@ export async function scene(si: SceneInfo) {
   // const sceneFile = '3dtiles/gltf_b3dm/rock.gltf';
   // const sceneFile = '3dtiles/gltf_b3dm/trunk.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/po1.glb';
-  const sceneFile = '3dtiles/gltf_b3dm/mountain1.glb';
+  // const sceneFile = '3dtiles/gltf_b3dm/mountain1.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/city.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/cottage2.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/model.gltf';
@@ -877,7 +1100,7 @@ export async function scene(si: SceneInfo) {
   // const sceneFile = '3dtiles/gltf_b3dm/l23_402.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/lod17.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/lod17_1.glb';
-  // const sceneFile = '3dtiles/gltf1/sample.gltf';
+  const sceneFile = '3dtiles/gltf1/sample.gltf';
   // const sceneFile = '3dtiles/b3dm2gltf/BlockBA_L18_';
   // const sceneFile = '3dtiles/gltf_b3dm/plane_tree_trunk/scene.gltf';
   // const sceneFile = '3dtiles/test_data2/luogang.glb';

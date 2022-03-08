@@ -1,7 +1,8 @@
-import { Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D } from "three";
+import { BufferGeometry, Float32BufferAttribute, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Vector2 } from "three";
 import { generateUUID } from "three/src/math/MathUtils";
 import { sceneStorage, TextureInfo } from "../store";
 import { getCanvas } from "./canvas";
+import { getIndexArray, splitTriangles } from "./GeometryUtils";
 
 export const MaterialStaticUtils = {
     getFirstMaterial(mesh: Mesh, index = 0) {
@@ -54,6 +55,56 @@ export const MaterialStaticUtils = {
         }
 
         return null;
+
+    },
+
+    createGridUVs(mesh: Mesh) {
+
+        const geometry = mesh.geometry;
+
+        splitTriangles(geometry);
+
+        const indexArr = getIndexArray(mesh);
+
+        const triCount = indexArr.length / 3 >> 0;
+
+        const rectPerRow = Math.sqrt(triCount / 2) >> 0;
+
+        const rectEdgeLen = 1 / rectPerRow;
+
+        let uv1 = new Vector2();
+        let uv2 = new Vector2();
+        let uv3 = new Vector2();
+
+        let uvs: number[] = [];
+
+        for (let i = 0; i < triCount; i++) {
+
+            const row = (i + 1) / (rectPerRow * 2) >> 0;
+
+            const line = i % (rectPerRow * 2) >> 1;
+
+            if (i % 2 === 0) {
+
+                uv1.set(line * rectEdgeLen, row * rectEdgeLen);
+                uv2.set(line * rectEdgeLen, row * rectEdgeLen + rectEdgeLen);
+                uv3.set(line * rectEdgeLen + rectEdgeLen, row * rectEdgeLen + rectEdgeLen);
+
+            } else {
+
+                uv1.set(line * rectEdgeLen, row * rectEdgeLen);
+                uv2.set(line * rectEdgeLen + rectEdgeLen, row * rectEdgeLen + rectEdgeLen);
+                uv3.set(line * rectEdgeLen + rectEdgeLen, row * rectEdgeLen);
+
+            }
+
+            uvs.push(uv1.x, uv1.y, uv2.x, uv2.y, uv3.x, uv3.y);
+
+        }
+
+        geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
+
+        return geometry;
 
     },
 
@@ -122,3 +173,4 @@ function canvasToBlob(cvs: HTMLCanvasElement) {
     })
 
 }
+

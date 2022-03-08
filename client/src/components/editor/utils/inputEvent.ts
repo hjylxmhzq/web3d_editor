@@ -4,12 +4,15 @@ class CustomKeyboardEvent {
     public shift = false;
     public meta = false;
     public space = false;
+    public alt = false;
     constructor() {
         window.addEventListener('keydown', (e) => {
+            console.log(e);
             switch (e.key) {
                 case 'Control': this.ctrl = true; break;
                 case 'Shift': this.shift = true; break;
                 case 'Meta': this.meta = true; break;
+                case 'Alt': this.alt = true; break;
             }
         });
         window.addEventListener('keyup', (e) => {
@@ -17,6 +20,7 @@ class CustomKeyboardEvent {
                 case 'Control': this.ctrl = false; break;
                 case 'Shift': this.shift = false; break;
                 case 'Meta': this.meta = false; break;
+                case 'Alt': this.alt = false; break;
             }
         });
     }

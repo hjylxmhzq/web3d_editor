@@ -164,12 +164,110 @@ export function getAllPoints(mesh: Mesh) {
     return points;
 }
 
+export function splitTriangles(geo: BufferGeometry) {
 
-export function getIndexArray(mesh: Mesh) {
-    let index = mesh.geometry.getIndex()?.array;
+    const uvs: number[] = [];
+    const index: number[] = [];
+    const position: number[] = [];
+    const color: number[] = [];
+
+    const posAttr = geo.getAttribute('position');
+    const colorAttr = geo.getAttribute('color');
+
+    const indexAttr = geo.getIndex();
+
+    if (!indexAttr) {
+
+        const index = getIndexArray(geo);
+        geo.setIndex(Array.from(index));
+        return;
+
+    }
+
+    for (let i = 0; i < indexAttr.count; i++) {
+
+        const vIdx = indexAttr.getX(i);
+
+        const x = posAttr.getX(vIdx);
+        const y = posAttr.getY(vIdx);
+        const z = posAttr.getZ(vIdx);
+
+        position.push(x, y, z);
+
+
+        if (colorAttr) {
+
+            const x = colorAttr.getX(vIdx);
+            const y = colorAttr.getY(vIdx);
+            const z = colorAttr.getZ(vIdx);
+
+            if (colorAttr.itemSize === 4) {
+
+                const w = colorAttr.getW(vIdx);
+
+                color.push(x, y, z, w);
+
+            } else {
+
+                color.push(x, y, z);
+
+            }
+
+        }
+
+        index.push(i);
+
+    }
+
+    geo.setAttribute('position', new Float32BufferAttribute(position, 3));
+
+    geo.deleteAttribute('uv');
+
+    if (color.length) {
+
+        geo.setAttribute('color', new Float32BufferAttribute(color, 3));
+
+    }
+
+    const groupCount = index.length / 3000 >> 0;
+
+    const countPerGroup = index.length / groupCount >> 0;
+
+    for (let i = 0; i < groupCount; i++) {
+
+        if (i === groupCount - 1) {
+
+            geo.addGroup(i * countPerGroup, index.length - i * countPerGroup, 0);
+            break;
+        }
+
+        geo.addGroup(i * countPerGroup, countPerGroup, 0);
+
+    }
+
+    geo.setIndex(index);
+
+    geo.deleteAttribute('normal');
+
+    geo.computeVertexNormals();
+
+    return geo;
+
+}
+
+
+export function getIndexArray(geo: Mesh | BufferGeometry) {
+
+    if (geo instanceof Mesh) {
+
+        geo = geo.geometry;
+
+    }
+
+    let index = geo.getIndex()?.array;
     if (!index) {
 
-        index = Array.from({ length: mesh.geometry.getAttribute('position').count });
+        index = Array.from({ length: geo.getAttribute('position').count });
         for (let i = 0; i < index.length; i++) {
 
             (index as any)[i] = i;
@@ -181,7 +279,23 @@ export function getIndexArray(mesh: Mesh) {
     return index;
 }
 
+let lastMesh: Mesh | null = null;
+let lastGroup: Group | null = null;
+
+export function refitMeshEdge() {
+
+    if (lastMesh && lastGroup) {
+
+        lastMesh.updateMatrixWorld();
+        lastMesh.matrixWorld.decompose(lastGroup.position, lastGroup.quaternion, lastGroup.scale);
+
+    }
+
+}
+
 export function createMeshEdge(mesh: Mesh, depthTest = false, color: Color = new Color(0x00ffff)) {
+
+    lastMesh = mesh;
 
     const indexArr = getIndexArray(mesh);
 
@@ -196,23 +310,42 @@ export function createMeshEdge(mesh: Mesh, depthTest = false, color: Color = new
     const geometry = new BufferGeometry();
     const array = [];
 
-    for (let i = 0; i < indexArr.length; i++) {
-        const x = position.getX(i);
-        const y = position.getY(i);
-        const z = position.getZ(i);
+    for (let i = 0; i < indexArr.length; i += 3) {
 
-        const nx = normal.getX(i);
-        const ny = normal.getX(i);
-        const nz = normal.getX(i);
+        const vs: Vector3[] = [];
 
-        const n = new Vector3(nx, ny, nz).normalize().multiplyScalar(0.01);
-        const v = new Vector3(x, y, z);
+        for (let j = i; j < i + 3; j++) {
 
-        v.add(n);
+            const vIdx = indexArr[j];
 
-        array.push(
-            v.x, v.y, v.z
-        );
+            const x = position.getX(vIdx);
+            const y = position.getY(vIdx);
+            const z = position.getZ(vIdx);
+
+            const nx = normal.getX(vIdx);
+            const ny = normal.getY(vIdx);
+            const nz = normal.getZ(vIdx);
+
+            const n = new Vector3(nx, ny, nz).normalize().multiplyScalar(0.01);
+            const v = new Vector3(x, y, z);
+
+            v.add(n);
+
+            vs.push(v);
+
+        }
+
+        for (let j = 0; j < vs.length; j++) {
+
+            const j1 = (j + 1) % vs.length;
+
+            array.push(
+                vs[j].x, vs[j].y, vs[j].z,
+                vs[j1].x, vs[j1].y, vs[j1].z,
+            );
+
+        }
+
     }
 
     geometry.setAttribute('position', new Float32BufferAttribute(array, 3));
@@ -222,7 +355,7 @@ export function createMeshEdge(mesh: Mesh, depthTest = false, color: Color = new
     function emptyRaycast() { }
 
     const group = new Group();
-    // editGroup.matrixAutoUpdate = false;
+    lastGroup = group;
     group.raycast = emptyRaycast;
     mesh.updateMatrixWorld();
     mesh.matrixWorld.decompose(group.position, group.quaternion, group.scale);

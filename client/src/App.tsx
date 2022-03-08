@@ -8,7 +8,7 @@ function App() {
   const [current, setCurrent] = useState('tilegen');
   useEffect(() => {
     window.addEventListener('keydown', (e) => {
-      if (e.key === '1') {
+      if (e.key === '!') {
         console.log('set current');
         setCurrent(current === 'scene' ? 'tilegen' : 'scene');
       }

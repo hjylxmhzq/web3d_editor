@@ -4,6 +4,7 @@ import { customMouseEvent } from "../../Scene/customMouseEvent";
 import { sceneSettings } from "../settings";
 import { getCanvas, isCanvas } from "./canvas";
 import { GeoStaticUtils } from "./GeometryUtils";
+import { MaterialStaticUtils } from "./MaterialUtils";
 import { minMax } from "./MathUtilities";
 
 
@@ -148,24 +149,38 @@ export function getLastMaterial() {
 
 }
 
+async function restoreBitMapTexture() {
 
-customMouseEvent.onMouseUp(() => {
-    
     if (lastMaterial && lastMaterial.map && isCanvas(lastMaterial.map.image)) {
-        
+
         pending = true;
-        createImageBitmap(lastMaterial.map.image).then(bitmap => {
 
-            lastMaterial?.map?.image && (lastMaterial.map.image = bitmap);
+        const bitmap = await createImageBitmap(lastMaterial.map.image, {
+            imageOrientation: lastMaterial.map.flipY ? 'flipY' : 'none',
+        });
 
-            pending = false;
+        if (lastMaterial) {
+
+            lastMaterial.map.image && (lastMaterial.map.image = bitmap);
+
+            lastMaterial.map.needsUpdate = true;
+
+            lastMaterial.needsUpdate = true;
 
             lastMaterial = null;
 
-        });
+        }
+
+        pending = false;
 
     }
 
+}
+
+
+customMouseEvent.onMouseUp(() => {
+
+    restoreBitMapTexture();
     begin = true;
 
 });
@@ -174,7 +189,7 @@ const lastPos = new Vector3();
 const lastUVPos = new Vector2();
 
 
-export function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh, params: PaintParams) {
+export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh, params: PaintParams) {
 
     if (pending) {
 
@@ -194,10 +209,22 @@ export function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh
 
     const m = material[materialIndex] as MeshStandardMaterial | MeshBasicMaterial;
 
+    if (lastMaterial && m !== lastMaterial) {
+
+        restoreBitMapTexture();
+        return;
+
+    }
 
     if (lastPos.distanceTo(point) < 0.001) {
 
         return;
+
+    }
+
+    if (!m.map) {
+
+        m.map = new Texture();
 
     }
 
@@ -247,10 +274,10 @@ export function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh
         const tri = new Triangle(vertices[0], vertices[1], vertices[2]);
 
         tri.getUV(point, uvs[0], uvs[1], uvs[2], _v2);
-        
+
         GeoStaticUtils.resolveWrapUV(_v2, m.map.wrapS, m.map.wrapT);
 
-        const image = m.map.image as ImageBitmap;
+        let image = m.map.image as ImageBitmap;
 
         const { width, height } = image;
 
@@ -275,12 +302,17 @@ export function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh
 
                     }
 
-
                     // const size = params.size / avgDis3D * avgDis2D;
 
                     const size = params.size * 10;
 
                     let radius = size >> 0;
+
+                    if (m.map.flipY) {
+
+                        _v2.y = 1 - _v2.y;
+
+                    }
 
                     const x = _v2.x * width >> 0, y = _v2.y * height >> 0;
 
@@ -316,6 +348,11 @@ export function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh
 
             } else {
 
+                pending = true;
+                if (m.map.flipY) {
+                    image = await createImageBitmap(image, {imageOrientation: 'flipY'});
+                }
+                pending = false;
                 const cvs = getCanvas(width, height);
                 const ctx = cvs.getContext('2d');
                 ctx?.drawImage(image, 0, 0, width, height);
@@ -325,9 +362,36 @@ export function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh
 
             lastMaterial = m;
             m.map.needsUpdate = true;
+            m.needsUpdate = true;
 
             lastPos.copy(point);
             lastUVPos.copy(_v2);
+
+        }
+
+    } else {
+
+        // create an empty texture
+
+        const size = 1024;
+        const cvs = getCanvas(size, size);
+        const ctx = cvs.getContext('2d');
+
+        if (ctx) {
+
+            ctx.clearRect(0, 0, size, size);
+
+            pending = true;
+
+            const imgBitMap = await createImageBitmap(cvs);
+
+            pending = false;
+
+            m.map.image = imgBitMap;
+
+            m.map.needsUpdate = true;
+
+            m.needsUpdate = true;
 
         }
 
