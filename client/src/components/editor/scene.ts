@@ -1,7 +1,7 @@
 import { SceneInfo } from './index';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
-import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide } from 'three';
+import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide, ConeBufferGeometry } from 'three';
 import EventEmitter from 'events';
 import { CustomTransformControls } from '../Scene/CustomTransformControls';
 import { FlyOrbitControls } from '../Scene/FlyOrbitControls';
@@ -10,20 +10,16 @@ import { sceneManager } from '../api/scene';
 import { Octree } from './utils/Octree';
 import { SimplifyModifier } from './utils/SimplifyModifier';
 import { SimplifyModifier as SimplifyModifierOrigin } from './utils/SimplifyModifierOrigin';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter'
-import { mergeVertices } from './utils/mergeVertices';
 import simplifyMesh from './utils/SimplifyModifierTexture';
-import { mergeBufferGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils';
 import { saveToLocal, TilesGenerator } from './utils/gen3dtiles';
-import { generateUUID } from 'three/src/math/MathUtils';
-import { MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree, MeshBVHVisualizer, SplitStrategy, SAH, CENTER, AVERAGE } from 'three-mesh-bvh';
-import { createMeshEdge, GeometryOperator, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
+import { MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree, SplitStrategy, SAH, CENTER, AVERAGE } from 'three-mesh-bvh';
+import { MeshBVHVisualizer } from './utils/MeshBVHVisializer';
+import { createMeshEdge, GeometryOperator, GeoStaticUtils, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
 import { debounce, normalizeMousePosition } from './utils/common';
 import { SubdivisionModifier } from './utils/SubdivisionModifier';
 import { createBrushHelper, performStroke, StrokeParameter } from './utils/sculptTools';
 import customKeyboardEvent from './utils/inputEvent';
-import { observe, SceneSetting, sceneSettings } from './settings';
-import { useRef } from 'react';
+import { observe, SceneSetting, sceneSettings, TextureType } from './settings';
 import { createPaintBrushMesh, getLastMaterial, performPaint, performPaintOnPoint } from './utils/drawTools';
 import { getTrianglesHighlightMesh, updateHighlightTriangle } from './utils/Highlight';
 import { getCanvas, isCanvas } from './utils/canvas';
@@ -34,6 +30,8 @@ import { sceneStorage } from './store';
 import { SelectionBoxHelper } from './utils/SelectBoxHelper';
 import { rectCast } from './utils/rectCast';
 import { CSG } from 'three-csg-ts';
+import { exportGLTF } from './utils/exporter';
+import { createBaseMapPlane } from './utils/baseMap';
 
 const saveBtn = document.createElement('button');
 
@@ -54,6 +52,7 @@ const _identityM4 = new Matrix4().identity();
 
 const selectedMeshRef: { current: undefined | Mesh } = { current: undefined };
 const selectedMeshSet: Set<Mesh> = new Set();
+const selectedTriSet: Set<number> = new Set();
 
 const raycaster = new Raycaster();
 
@@ -65,7 +64,7 @@ export async function scene(si: SceneInfo) {
 
     let currentTool = sceneSettings.currentTool;
 
-    if (currentTool === 'sculpt') {
+    if (currentTool === 'edit' && sceneSettings.edit.type === 'sculpt') {
 
       // brushHelper.visible = true;
 
@@ -117,9 +116,35 @@ export async function scene(si: SceneInfo) {
 
       if (selectedMeshRef.current) {
 
-        const newGeo = subdivitionModifier.modify(selectedMeshRef.current.geometry);
+        let addFaceIndices
 
+        let newGeo: BufferGeometry;
+        if (sceneSettings.edit.simpleSubdivision) {
+
+          const go = new GeometryOperator(selectedMeshRef.current.geometry);
+          if (selectedTriSet.size) {
+
+            addFaceIndices = go.simpleSubdivision(Array.from(selectedTriSet));
+
+          } else {
+
+            go.simpleSubdivision();
+
+          }
+          newGeo = go.rebuild();
+
+        } else {
+
+          newGeo = subdivisionModifier.modify(selectedMeshRef.current.geometry);
+
+        }
         selectedMeshRef.current.geometry = newGeo;
+
+        selectedMeshRef.current.geometry.boundsTree = new MeshBVH(newGeo, { strategy: CENTER });
+
+        selectedTriSet.clear();
+
+        trianglesHighlightHelper.clear();
 
         updateBVHHelper();
 
@@ -160,6 +185,8 @@ export async function scene(si: SceneInfo) {
             m.flatShading = true;
           }
         });
+        const translateMatrix = new Matrix4().makeTranslation(0, 1, 0);
+        newMesh.applyMatrix4(translateMatrix);
         group.add(newMesh);
         octree.add(newMesh);
       }
@@ -169,7 +196,37 @@ export async function scene(si: SceneInfo) {
   observe(() => sceneSettings.action.intersectGeometries, (o, n) => {
     if (o !== n) {
       if (selectedMeshSet.size) {
-        
+        if (selectedMeshSet.size > 1) {
+          const meshes = Array.from(selectedMeshSet).filter(m => m.geometry.getAttribute('position'));
+          const newMesh = CSG.intersect(meshes[0], meshes[1]);
+          MaterialStaticUtils.getAllMaterial(newMesh).forEach(m => {
+            if (m instanceof MeshStandardMaterial) {
+              m.flatShading = true;
+            }
+          });
+          const translateMatrix = new Matrix4().makeTranslation(0, 1, 0);
+          newMesh.applyMatrix4(translateMatrix);
+          group.add(newMesh);
+          octree.add(newMesh);
+        }
+      }
+    }
+  });
+
+  observe(() => sceneSettings.action.extractFaces, (o, n) => {
+    if (o !== n) {
+      if (selectedMeshRef.current && selectedTriSet.size) {
+        const go = new GeometryOperator(selectedMeshRef.current.geometry);
+        const newMesh = selectedMeshRef.current.clone();
+        go.selectFaces(Array.from(selectedTriSet));
+        newMesh.geometry = go.rebuild();
+        selectedMeshRef.current.updateMatrixWorld();
+        selectedMeshRef.current.matrixWorld.decompose(newMesh.position, newMesh.quaternion, newMesh.scale);
+        GeoStaticUtils.reCenterVertices(newMesh);
+        const translateMatrix = new Matrix4().makeTranslation(0, 1, 0);
+        newMesh.applyMatrix4(translateMatrix);
+        octree.add(newMesh);
+        group.add(newMesh);
       }
     }
   });
@@ -185,10 +242,34 @@ export async function scene(si: SceneInfo) {
     }
   });
 
+  observe(() => sceneSettings.scene.showBaseMap, () => {
+    if (sceneSettings.scene.showBaseMap) {
+      let baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, 18);
+      baseMapGroup.add(baseMapPlane);
+    } else {
+      baseMapGroup.clear();
+    }
+  });
+
   observe(() => sceneSettings.global.meshEdgeDepthTest, (o, n) => {
     if (o !== n) {
       if (selectedMeshRef.current) {
         updateMeshEdge();
+      }
+    }
+  });
+
+  observe(() => sceneSettings.action.recomputeCenter, (o, n) => {
+    if (o !== n) {
+      if (selectedMeshRef.current) {
+        GeoStaticUtils.reCenterVertices(selectedMeshRef.current);
+        transformControl.detach();
+        boxHelperGroup.clear();
+        bvhHelperGroup.clear();
+        meshEdgeHelperGroup.clear();
+        octree.remove(selectedMeshRef.current);
+        octree.add(selectedMeshRef.current);
+        selectedMeshRef.current = undefined;
       }
     }
   });
@@ -231,6 +312,22 @@ export async function scene(si: SceneInfo) {
     }
   });
 
+  observe(() => sceneSettings.action.mergeGeometries, async (o, n) => {
+    if (selectedMeshSet.size) {
+      const newMesh = GeoStaticUtils.mergeMeshes(Array.from(selectedMeshSet));
+      const sizeVector = new Vector3(1, 0, 0);
+      newMesh.geometry.boundingBox?.getSize(sizeVector)
+      const translateMatrix = new Matrix4().makeTranslation(sizeVector.x, 0, 0);
+      newMesh.applyMatrix4(translateMatrix);
+      octree.add(newMesh);
+      group.add(newMesh);
+    }
+  });
+
+  observe(() => sceneSettings.action.dulplicateMesh, async (o, n) => {
+    dulplicateMesh();
+  });
+
   observe(() => sceneSettings.action.createGeometry, async (o, n) => {
 
     function updatePosition(mesh: Mesh) {
@@ -242,14 +339,14 @@ export async function scene(si: SceneInfo) {
       position.add(direction.multiplyScalar(10));
       mesh.position.copy(position);
     }
-    const material = new MeshStandardMaterial();
+    const material = new MeshStandardMaterial({ flatShading: false });
     const mesh = new Mesh(undefined, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     updatePosition(mesh);
 
     if (sceneSettings.action.createGeometry === 'sphere') {
-      const sphere = new SphereBufferGeometry(2, 50, 50);
+      const sphere = new SphereBufferGeometry(2, 20, 20);
       mesh.geometry = sphere;
     } else if (sceneSettings.action.createGeometry === 'box') {
       const box = new BoxBufferGeometry(2, 2, 2, 5, 5);
@@ -259,6 +356,11 @@ export async function scene(si: SceneInfo) {
       material.side = DoubleSide;
       mesh.geometry = plane;
       mesh.rotateX(-0.5 * Math.PI);
+      mesh.updateMatrixWorld();
+    } else if (sceneSettings.action.createGeometry === 'cone') {
+      const cone = new ConeBufferGeometry(2, 5, 20, 20);
+      material.side = DoubleSide;
+      mesh.geometry = cone;
       mesh.updateMatrixWorld();
     }
 
@@ -299,6 +401,42 @@ export async function scene(si: SceneInfo) {
     }
   });
 
+  observe(() => {
+    let _ = sceneSettings.action.exportSceneToGltf
+  }, async (o, n) => {
+    exportGLTF(group);
+  });
+
+  observe(() => {
+    let _ = sceneSettings.action.exportSelectedToGltf
+  }, async (o, n) => {
+    if (selectedMeshRef.current) {
+      exportGLTF(selectedMeshRef.current);
+    }
+  });
+
+  observe(() => {
+    let _ = sceneSettings.action.clearAllTexture
+  }, async (o, n) => {
+    if (selectedMeshRef.current) {
+      const materials = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
+      for (let m of materials) {
+        const cvs = getCanvas(10, 10, false, true, 0xdddddd);
+        const imageBitMap = await createImageBitmap(cvs);
+        m.map && (m.map.image = imageBitMap);
+        m.map && (m.map.needsUpdate = true);
+        m.aoMap = null;
+        if (m instanceof MeshStandardMaterial) {
+          m.normalMap = null;
+          m.roughnessMap = null;
+          m.metalnessMap = null;
+          m.displacementMap = null;
+        }
+        m.needsUpdate = true;
+      }
+    }
+  });
+
   observe(() => sceneSettings.action.applyTexture, async (o, n) => {
     if (!selectedMeshRef.current) {
 
@@ -326,7 +464,7 @@ export async function scene(si: SceneInfo) {
 
     if (texture && textureImg) {
 
-      const {naturalWidth: w, naturalHeight: h} = textureImg;
+      const { naturalWidth: w, naturalHeight: h } = textureImg;
 
       const cvs = getCanvas(w, h);
       const ctx = cvs.getContext('2d');
@@ -337,15 +475,36 @@ export async function scene(si: SceneInfo) {
 
         const imgBitMap = await createImageBitmap(cvs);
 
-        const mList = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
+        let mList = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
+
+
+        if (selectedTriSet.size) {
+
+          const go = new GeometryOperator(selectedMeshRef.current.geometry);
+          const originMaterialIndex = go.extractFacesToGroup(Array.from(selectedTriSet));
+          selectedMeshRef.current.geometry = go.rebuild();
+          if (!Array.isArray(selectedMeshRef.current.material)) {
+            selectedMeshRef.current.material = [selectedMeshRef.current.material as MeshStandardMaterial];
+          }
+          const m = (selectedMeshRef.current.material as MeshStandardMaterial[])[originMaterialIndex];
+          const newMaterial = m.clone();
+          m.map && (newMaterial.map = m.map?.clone());
+          selectedMeshRef.current.material.push(newMaterial);
+          mList = [newMaterial];
+
+        }
 
         if (texture.type === 'albedo') {
 
-          const t = MaterialStaticUtils.getTexture(selectedMeshRef.current);
+          for (let m of mList) {
 
-          if (t) {
-            t.image = imgBitMap;
-            t.needsUpdate = true;
+            const t = m.map;
+  
+            if (t) {
+              t.image = imgBitMap;
+              t.needsUpdate = true;
+            }
+
           }
 
         } else if (texture.type === 'normal') {
@@ -381,6 +540,66 @@ export async function scene(si: SceneInfo) {
               displaceMap.needsUpdate = true;
 
               m.displacementMap = displaceMap;
+
+              m.needsUpdate = true;
+
+            }
+
+          }
+
+        } else if (texture.type === TextureType.roughness) {
+
+          for (let m of mList) {
+
+            if (m instanceof MeshStandardMaterial) {
+
+              const roughnessMap = m.map?.clone() || new Texture();
+
+              roughnessMap.image = imgBitMap;
+
+              roughnessMap.needsUpdate = true;
+
+              m.roughnessMap = roughnessMap;
+
+              m.needsUpdate = true;
+
+            }
+
+          }
+
+        } else if (texture.type === TextureType.ao) {
+
+          for (let m of mList) {
+
+            if (m instanceof MeshStandardMaterial) {
+
+              const aoMap = m.map?.clone() || new Texture();
+
+              aoMap.image = imgBitMap;
+
+              aoMap.needsUpdate = true;
+
+              m.aoMap = aoMap;
+
+              m.needsUpdate = true;
+
+            }
+
+          }
+
+        } else if (texture.type === TextureType.metalness) {
+
+          for (let m of mList) {
+
+            if (m instanceof MeshStandardMaterial) {
+
+              const metalnessMap = m.map?.clone() || new Texture();
+
+              metalnessMap.image = imgBitMap;
+
+              metalnessMap.needsUpdate = true;
+
+              m.metalnessMap = metalnessMap;
 
               m.needsUpdate = true;
 
@@ -425,19 +644,28 @@ export async function scene(si: SceneInfo) {
     }
 
     if (bvhHelperGroup.children.length) {
-      (bvhHelperGroup.children[0] as MeshBVHVisualizer).depth = BVHHelperDepth;
-      (bvhHelperGroup.children[0] as MeshBVHVisualizer).update();
+      (bvhHelperGroup.children[0] as any).depth = BVHHelperDepth;
+      (bvhHelperGroup.children[0] as any).update();
     }
 
   });
 
-  let editingMeshes = [];
   let helperGroup = new Group();
   let meshEdgeHelperGroup = new Group();
   let bvhHelperGroup = new Group();
+  let baseMapGroup = new Group();
   let brushHelper = createBrushHelper();
   let paintBrushHelper = createPaintBrushMesh();
-  let trianglesHighlightHelper = getTrianglesHighlightMesh();
+  let trianglesHighlightHelper = new Group();
+
+  if (sceneSettings.scene.showBaseMap) {
+
+    let baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, 18);
+    baseMapGroup.add(baseMapPlane);
+
+  }
+
+  trianglesHighlightHelper.add(getTrianglesHighlightMesh());
   let boxHelperGroup = new Group();
   brushHelper.visible = false;
   paintBrushHelper.visible = false;
@@ -449,6 +677,8 @@ export async function scene(si: SceneInfo) {
   helperGroup.add(boxHelperGroup);
   helperGroup.add(paintBrushHelper);
   helperGroup.add(trianglesHighlightHelper);
+  helperGroup.add(trianglesHighlightHelper);
+  helperGroup.add(baseMapGroup);
 
   let octree = new Octree({
     undeferred: false,
@@ -463,21 +693,27 @@ export async function scene(si: SceneInfo) {
     scene,
   });
 
+  octree.helperGroup.visible = sceneSettings.global.showOctreeHelper;
+
   const tilesGenerator = new TilesGenerator();
 
-  const subdivitionModifier = new SubdivisionModifier(1);
+  const subdivisionModifier = new SubdivisionModifier(1);
 
   const selectBoxHelper = SelectionBoxHelper.getinstance(renderer.domElement, 'selection-box-helper');
 
   function renderLoop() {
     requestAnimationFrame(renderLoop);
     renderer.render(scene, camera);
+    flyOrbitControls.update();
     octree.update();
     camera.updateMatrixWorld();
     renderEvent.emit('render');
   }
 
   const flyOrbitControls = new FlyOrbitControls(camera, renderer.domElement);
+
+  (window as any).fc = flyOrbitControls;
+
   flyOrbitControls.screenSpacePanning = false;
   flyOrbitControls.minDistance = 1;
   flyOrbitControls.maxDistance = 2000;
@@ -498,11 +734,42 @@ export async function scene(si: SceneInfo) {
   });
 
   const transformControl = new CustomTransformControls(camera, renderer.domElement);
+
   transformControl.setMode(sceneSettings.transform.type);
   onTransform(transformControl, octree);
 
   scene.add(transformControl);
 
+
+  function dulplicateMesh() {
+
+    const translateMatrix = new Matrix4().makeTranslation(0, 0, 5);
+
+    if (selectedMeshSet.size) {
+
+      selectedMeshSet.forEach(mesh => {
+
+        dulplicate(mesh);
+
+      });
+
+    } else if (selectedMeshRef.current) {
+
+      dulplicate(selectedMeshRef.current);
+
+    }
+
+    function dulplicate(mesh: Mesh) {
+      const newMesh = mesh.clone();
+      mesh.updateMatrixWorld();
+      mesh.matrixWorld.decompose(newMesh.position, newMesh.quaternion, newMesh.scale);
+      newMesh.applyMatrix4(translateMatrix);
+
+      octree.add(newMesh);
+      group.add(newMesh);
+    }
+
+  }
 
   function updateMeshEdge() {
 
@@ -510,6 +777,18 @@ export async function scene(si: SceneInfo) {
 
       meshEdgeHelperGroup.clear();
       meshEdgeHelperGroup.add(createMeshEdge(selectedMeshRef.current, sceneSettings.global.meshEdgeDepthTest));
+
+    }
+
+  }
+
+  function updateTrianglesHelper() {
+
+    if (selectedMeshRef.current && selectedTriSet.size > 0) {
+
+      const mesh = updateHighlightTriangle(selectedMeshRef.current, selectedTriSet);
+      trianglesHighlightHelper.clear();
+      trianglesHighlightHelper.add(mesh);
 
     }
 
@@ -523,7 +802,7 @@ export async function scene(si: SceneInfo) {
 
       if (bvhHelperGroup.children[0]) {
 
-        (bvhHelperGroup.children[0] as MeshBVHVisualizer).update();
+        (bvhHelperGroup.children[0] as any).update();
 
       }
       return;
@@ -539,13 +818,11 @@ export async function scene(si: SceneInfo) {
 
     bvhHelperGroup.clear();
 
-    bvhHelperGroup.position.set(0, 0, 0);
-    bvhHelperGroup.scale.set(1, 1, 1);
-    bvhHelperGroup.quaternion.identity();
-
     bvhHelperGroup.add(bvhVisualizer);
 
-    bvhHelperGroup.applyMatrix4(selectedMeshRef.current.matrixWorld);
+    selectedMeshRef.current.updateMatrixWorld();
+    // selectedMeshRef.current.matrixWorld.decompose(bvhHelperGroup.position, bvhHelperGroup.quaternion, bvhHelperGroup.scale);
+    bvhHelperGroup.updateMatrixWorld();
 
     console.log(bvhVisualizer)
 
@@ -562,13 +839,13 @@ export async function scene(si: SceneInfo) {
         if (force || !mesh.geometry.boundingBox) {
 
           mesh.geometry.computeBoundingBox();
-  
+
         }
 
         const bbox = mesh.geometry.boundingBox?.clone().applyMatrix4(mesh.matrixWorld);
 
         if (!bbox) return;
-  
+
         const boxHelper = new Box3Helper(bbox, new Color('blue'));
         boxHelperGroup.add(boxHelper);
 
@@ -606,7 +883,7 @@ export async function scene(si: SceneInfo) {
 
   }
 
-  function updateTransformInfo() {
+  const updateTransformInfo = debounce(() => {
 
     if (selectedMeshRef.current) {
       transforming = true;
@@ -617,7 +894,7 @@ export async function scene(si: SceneInfo) {
       transforming = false;
     }
 
-  }
+  }, 50);
 
   let transforming = false;
 
@@ -645,7 +922,7 @@ export async function scene(si: SceneInfo) {
 
   renderEvent.on('render', () => {
 
-    if (sceneSettings.currentTool === 'sculpt') {
+    if (sceneSettings.currentTool === 'edit' && sceneSettings.edit.type === 'sculpt') {
 
       brushHelper.scale.set(sceneSettings.sculpt.size, sceneSettings.sculpt.size, sceneSettings.sculpt.size);
 
@@ -663,7 +940,7 @@ export async function scene(si: SceneInfo) {
 
     if (customKeyboardEvent.ctrl) {
 
-      if (sceneSettings.currentTool === 'sculpt') {
+      if (sceneSettings.currentTool === 'edit' && sceneSettings.edit.type === 'sculpt') {
 
         sceneSettings.sculpt.size += e.deltaY / 500;
         sceneSettings.sculpt.size = sceneSettings.sculpt.size < 0.05 ? 0.05 : sceneSettings.sculpt.size > 1000 ? 1000 : sceneSettings.sculpt.size;
@@ -683,17 +960,26 @@ export async function scene(si: SceneInfo) {
 
   customKeyboardEvent.onKey('Control',
     (e) => {
-
       flyOrbitControls.enabled = false;
-
     },
     (e) => {
-
       flyOrbitControls.enabled = true;
-
     }
   );
 
+  customKeyboardEvent.onKey('v',
+    (e) => {
+      if (customKeyboardEvent.ctrl || customKeyboardEvent.meta) {
+        dulplicateMesh();
+      }
+    }
+  );
+
+  customKeyboardEvent.onKey('Backspace',
+    (e) => {
+      sceneSettings.action.deleteGeometry++;
+    }
+  );
   customMouseEvent.onMouseDown(() => {
 
     const m = getLastMaterial();
@@ -722,11 +1008,64 @@ export async function scene(si: SceneInfo) {
     flyOrbitControls.enabled = true;
   })
 
+  let shouldDetach = false;
+  customKeyboardEvent.onKey('t', (e) => {
+    updateSeletedMesh(lastMousePos.x, lastMousePos.y);
+    if (selectedMeshRef.current) {
+      sceneSettings.transform.type = 'translate';
+      transformControl.detach();
+      transformControl.attach(selectedMeshRef.current);
+      shouldDetach = true;
+    }
+  });
+
+  customKeyboardEvent.onKey('r', (e) => {
+    updateSeletedMesh(lastMousePos.x, lastMousePos.y);
+    if (selectedMeshRef.current) {
+      sceneSettings.transform.type = 'rotate';
+      transformControl.detach();
+      transformControl.attach(selectedMeshRef.current);
+      shouldDetach = true;
+    }
+  });
+
+  customKeyboardEvent.onKey('g', (e) => {
+    updateSeletedMesh(lastMousePos.x, lastMousePos.y);
+    if (selectedMeshRef.current) {
+      sceneSettings.transform.type = 'scale';
+      transformControl.detach();
+      transformControl.attach(selectedMeshRef.current);
+      shouldDetach = true;
+    }
+  });
+
+  customKeyboardEvent.onKey('Escape', (e) => {
+    if (selectedMeshRef.current) {
+      transformControl.detach();
+      selectedMeshRef.current = undefined;
+      bvhHelperGroup.clear();
+      boxHelperGroup.clear();
+      meshEdgeHelperGroup.clear();
+    }
+  });
+
+  customMouseEvent.onMouseUp(() => {
+    if (shouldDetach) {
+      shouldDetach = false;
+      transformControl.detach();
+    }
+  })
+
+  let lastMousePos = new Vector2();
+
   customMouseEvent.onMousemove((e) => {
+
+    lastMousePos.x = e.clientX;
+    lastMousePos.y = e.clientY;
 
     if (sceneSettings.scene.liveSelect) {
 
-      updateSeletedMesh(e);
+      updateSeletedMesh(e.clientX, e.clientY);
 
     }
 
@@ -743,7 +1082,7 @@ export async function scene(si: SceneInfo) {
       if (!customKeyboardEvent.ctrl) {
 
         selectedMeshSet.clear();
-        
+
       }
 
       for (let mesh of collection) {
@@ -751,18 +1090,18 @@ export async function scene(si: SceneInfo) {
         selectedMeshSet.add(mesh);
 
       }
-      
+
       selectedMeshRef.current = undefined;
 
       updateBoundingBox();
-      
+
       return;
 
     }
 
     const boundsTree = selectedMeshRef.current?.geometry.boundsTree;
 
-    if (sceneSettings.currentTool === 'sculpt' || sceneSettings.currentTool === 'paint') {
+    if (sceneSettings.currentTool === 'edit' || sceneSettings.currentTool === 'paint') {
 
       if (boundsTree && selectedMeshRef.current) {
 
@@ -786,7 +1125,7 @@ export async function scene(si: SceneInfo) {
 
         if (hit.length) {
 
-          if (sceneSettings.currentTool === 'sculpt') {
+          if (sceneSettings.currentTool === 'edit') {
 
             brushHelper.visible = true;
 
@@ -794,11 +1133,13 @@ export async function scene(si: SceneInfo) {
 
             const hitFirst = hit[0];
 
+            const faceIndex = hitFirst.faceIndex;
+
             _v0.copy(hitFirst.point).applyMatrix4(selectedMeshRef.current.matrixWorld);
 
             brushHelper.position.copy(_v0);
 
-            if (customMouseEvent.mousedown && customKeyboardEvent.ctrl) {
+            if (customMouseEvent.mouseLeftDown && customKeyboardEvent.ctrl) {
 
               const changedTriangles = new Set();
               const changedIndices = new Set();
@@ -820,6 +1161,14 @@ export async function scene(si: SceneInfo) {
             } else {
 
               performStroke(boundsTree, _v0, selectedMeshRef.current, brushHelper, true, {}, sceneSettings.sculpt);
+
+              if (customMouseEvent.mouseRightDown && customKeyboardEvent.ctrl) {
+
+                faceIndex !== undefined && selectedTriSet.add(faceIndex);
+
+                updateTrianglesHelper();
+
+              }
 
             }
 
@@ -864,7 +1213,6 @@ export async function scene(si: SceneInfo) {
 
           }
 
-
         }
 
       }
@@ -873,7 +1221,7 @@ export async function scene(si: SceneInfo) {
 
   });
 
-  function updateSeletedMesh(e: MouseEvent) {
+  function updateSeletedMesh(x: number, y: number) {
 
     if (selectedMeshSet.size) {
 
@@ -883,7 +1231,12 @@ export async function scene(si: SceneInfo) {
 
     }
 
-    const { clientX: x, clientY: y } = e;
+    if (selectedTriSet.size) {
+
+      selectedTriSet.clear();
+      trianglesHighlightHelper.clear();
+
+    }
 
     let mouse = new Vector2(x, y);
 
@@ -901,7 +1254,7 @@ export async function scene(si: SceneInfo) {
 
     if (intersects.length) {
 
-      const firstCast = intersects[0].object;
+      const firstCast = intersects[0].object as Mesh;
 
       if (firstCast !== selectedMeshRef.current) {
 
@@ -923,7 +1276,7 @@ export async function scene(si: SceneInfo) {
 
         console.log(firstCast);
 
-        selectedMeshRef.current = firstCast as Mesh;
+        selectedMeshRef.current = firstCast;
 
         selectedMeshRef.current.updateMatrixWorld();
 
@@ -1027,53 +1380,56 @@ export async function scene(si: SceneInfo) {
 
       console.log('hit: ', hit);
 
-      const _temp = new Vector3();
-
       if (hit.length) {
 
         hit.sort((a, b) => a.distance - b.distance);
 
         const intersection = hit[0];
 
-        if (intersection.faceIndex && intersection.face) {
+        if (sceneSettings.currentTool === 'edit') {
 
-          const go = new GeometryOperator(selectedMeshRef.current.geometry);
+          if (intersection.faceIndex && intersection.face) {
 
-          if (sceneSettings.currentTool === 'addvertex') {
+            const go = new GeometryOperator(selectedMeshRef.current.geometry);
 
-            go.addVerticeInFace(intersection.faceIndex, intersection.point);
+            if (sceneSettings.edit.type === 'addvertex') {
 
-          } else if (sceneSettings.currentTool === 'deletevertex') {
+              go.addVerticeInFace(intersection.faceIndex, intersection.point);
 
-            go.removeAllJointFacesByFace(intersection.faceIndex);
+            } else if (sceneSettings.edit.type === 'deletevertex') {
 
-          } else if (sceneSettings.currentTool === 'addface') {
+              go.removeAllJointFacesByFaceAndReTriangulation(intersection.faceIndex);
 
-            go.addLoopFaceInFace(intersection.faceIndex);
+            } else if (sceneSettings.edit.type === 'deleteface') {
 
-          } else if (sceneSettings.currentTool === 'move') {
+              go.removeAllJointFacesByFace(intersection.faceIndex);
 
-            transformControl.detach();
-            transformControl.attach(selectedMeshRef.current);
+            } else if (sceneSettings.edit.type === 'addface') {
+
+              go.addLoopFaceInFace(intersection.faceIndex);
+
+            }
+
+            // go.removeAllJointFacesByFaceVertex(intersection.faceIndex, 0);
+
+            // const meshFace = new MeshFace(face.a, face.b, face.c, _temp);
+
+            const newGeo = go.rebuild();
+            selectedMeshRef.current.geometry = newGeo;
+            selectedMeshRef.current.geometry.boundsTree = new MeshBVH(newGeo, { strategy: CENTER });
+
+            meshEdgeHelperGroup.clear();
+
+            updateMeshEdge();
+
+            updateBVHHelper();
 
           }
 
-          // go.removeAllJointFacesByFaceVertex(intersection.faceIndex, 0);
+        } else if (sceneSettings.currentTool === 'move') {
 
-          // const meshFace = new MeshFace(face.a, face.b, face.c, _temp);
-
-          const newGeo = go.rebuild();
-
-          selectedMeshRef.current.geometry = newGeo;
-
-          meshEdgeHelperGroup.clear();
-
-
-          selectedMeshRef.current.geometry.boundsTree = new MeshBVH(newGeo, { strategy: CENTER });
-
-          updateMeshEdge();
-
-          updateBVHHelper();
+          transformControl.detach();
+          transformControl.attach(selectedMeshRef.current);
 
         }
 
@@ -1084,7 +1440,7 @@ export async function scene(si: SceneInfo) {
 
   customMouseEvent.onClickNoMove((e) => {
 
-    updateSeletedMesh(e);
+    updateSeletedMesh(e.clientX, e.clientY);
 
   });
 
@@ -1135,7 +1491,7 @@ export async function scene(si: SceneInfo) {
 
   // helperGroup.add(createMeshEdge(modelMesh, true, new Color('red')));
 
-  // modelMesh.geometry = subdivitionModifier.modify(simGeo);
+  // modelMesh.geometry = subdivisionModifier.modify(simGeo);
 
   // const simGeo = simplifyMesh(modelMesh.geometry, 0.1, false);
   // const simGeo = simplifyModifier.modify(modelMesh.geometry, 1) as any;

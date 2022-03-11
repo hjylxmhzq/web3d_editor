@@ -1,5 +1,6 @@
-import { BufferGeometry, Float32BufferAttribute, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Vector2 } from "three";
+import { BufferGeometry, Float32BufferAttribute, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Vector2, Vector3 } from "three";
 import { generateUUID } from "three/src/math/MathUtils";
+import { TextureType } from "../settings";
 import { sceneStorage, TextureInfo } from "../store";
 import { getCanvas } from "./canvas";
 import { getIndexArray, splitTriangles } from "./GeometryUtils";
@@ -138,7 +139,7 @@ export const MaterialStaticUtils = {
                                     ctx.drawImage(img, 0, 0, img.width, img.height);
                                     const blob = await canvasToBlob(cvs);
                                     const name = m.uuid || generateUUID();
-                                    collections.push({ name, texture: { type: 'albedo', image: blob, width: img.width, height: img.height } });
+                                    collections.push({ name, texture: { type: TextureType.albedo, image: blob, width: img.width, height: img.height } });
                                 }
                             }
                         }
@@ -157,6 +158,33 @@ export const MaterialStaticUtils = {
 
         }
 
+    },
+
+    getProjectionUVs(mesh: Mesh, camera: PerspectiveCamera) {
+        const positionAttr = mesh.geometry.getAttribute('position')
+        const modelMatrix = mesh.matrixWorld.clone();
+        const viewMatrix = camera.matrixWorldInverse.clone();
+        const projectMatrix = camera.projectionMatrix.clone();
+        const pvmMatrix = new Matrix4().copy(projectMatrix).multiply(viewMatrix).multiply(modelMatrix);
+        const uvs: number[] = [];
+
+        for (let i = 0; i < positionAttr.count; i++) {
+
+            const p = new Vector3().fromBufferAttribute(positionAttr, i);
+
+            p.applyMatrix4(pvmMatrix);
+            let u = p.x;
+            let v = p.y;
+
+            u = (u * 0.5) + 0.5;
+            v = (v * 0.5) + 0.5;
+
+            uvs.push(
+                u, v
+            );
+
+        }
+        return uvs;
     }
 }
 

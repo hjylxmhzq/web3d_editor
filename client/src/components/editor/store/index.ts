@@ -1,7 +1,8 @@
+import { TextureType } from "../settings";
 
 export interface TextureInfo {
     image: Blob;
-    type: 'albedo' | 'normal' | 'displace'
+    type: TextureType;
     width: number;
     height: number;
 }

@@ -1,11 +1,14 @@
 import React, { ChangeEventHandler, FormEventHandler, useEffect, useRef, useState } from 'react';
 import { useUpdate } from '../../../hooks/common';
-import { observe, sceneSettings } from '../settings';
+import { observe, sceneSettings, TextureType } from '../settings';
 import './Toolbox.scss';
 import { Switch, Radio, RadioChangeEvent, Select, Slider, Button } from 'antd';
 import { getCanvas } from '../utils/canvas';
 import { sceneStorage } from '../store';
 import { loadFile } from '../utils/Files';
+import axios from 'axios';
+import { config } from '../../../configs';
+import { loadOnlineTexture } from '../../api/io';
 
 const { Option } = Select;
 
@@ -13,10 +16,10 @@ export default function Toolbox() {
 
   const update = useUpdate();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [mode, setMode] = useState('move');
-  const [editMode, setEditMode] = useState('sculpt');
+  const [mode, setMode] = useState(sceneSettings.currentTool);
+  const [editMode, setEditMode] = useState(sceneSettings.edit.type);
   const [canvasVisible, setCanvasVisible] = useState(false);
-  const [textures, setTextures] = useState<({ name: string, url: string, type: 'albedo' | 'normal' | 'displace' })[]>([]);
+  const [textures, setTextures] = useState<({ name: string, url: string, type: TextureType })[]>([]);
 
 
   function updateTextures() {
@@ -30,15 +33,17 @@ export default function Toolbox() {
 
     }
 
+    urls.sort();
+
     setTextures(urls);
 
   }
 
-  async function loadTexture(type: 'normal' | 'albedo' | 'displace') {
+  async function loadTexture() {
     const file = await loadFile('image/*');
     sceneStorage.saveTexture(file.name, {
       image: file,
-      type,
+      type: sceneSettings.paint.importTextureType,
       width: 0,
       height: 0,
     });
@@ -46,6 +51,22 @@ export default function Toolbox() {
   }
 
   useEffect(() => {
+
+    (async () => {
+
+      const textures = await loadOnlineTexture();
+
+      for (let texture of textures) {
+        sceneStorage.saveTexture(texture.name, {
+          image: texture.image,
+          type: texture.type,
+          width: 0,
+          height: 0,
+        });
+      }
+      updateTextures();
+
+    })()
 
     observe(() => {
 
@@ -58,6 +79,8 @@ export default function Toolbox() {
       let _7 = sceneSettings.scene;
       let { x, y, z, type } = sceneSettings.transform;
       let _8 = sceneSettings.transform.type;
+      let _9 = sceneSettings.edit;
+      let _10 = sceneSettings.paint.importTextureType;
 
     }, () => {
 
@@ -78,6 +101,7 @@ export default function Toolbox() {
       update();
 
     });
+
     sceneStorage.onChange((key: string) => {
 
       if (key === 'textures') {
@@ -109,23 +133,17 @@ export default function Toolbox() {
 
   }, []);
 
+  function handleTextureTypeChange(v: TextureType) {
+
+    sceneSettings.paint.importTextureType = v;
+
+  }
+
   function handleModeChange(e: RadioChangeEvent) {
 
     const mode = e.target.value;
 
-    if (mode === 'browse') {
-
-      sceneSettings.currentTool = '';
-
-    } else if (mode === 'edit') {
-
-      sceneSettings.currentTool = 'sculpt';
-
-    } else {
-
-      sceneSettings.currentTool = mode;
-
-    }
+    sceneSettings.currentTool = mode;
 
     setMode(mode);
 
@@ -162,6 +180,12 @@ export default function Toolbox() {
         <div className='toolbox-outfolder-title'>Input/Output</div>
         <div className='toolbox-folder'>
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.importModel++}>Load Model</Button>
+        </div>
+        <div className='toolbox-folder'>
+          <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.exportSceneToGltf++}>Export Scene</Button>
+        </div>
+        <div className='toolbox-folder'>
+          <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.exportSelectedToGltf++}>Export Selected</Button>
         </div>
         <div className='toolbox-folder'>
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.saveTo3DTiles++}>Generate 3DTiles</Button>
@@ -215,7 +239,7 @@ export default function Toolbox() {
             <div className='toolbox-outfolder-title'>Geometry Pools</div>
             <div className='toolbox-folder'>
               {
-                ['sphere', 'box', 'plane'].map(geo => {
+                ['sphere', 'box', 'plane', 'cone'].map(geo => {
                   return <Button
                     size='small'
                     style={{ width: '49%' }}
@@ -240,10 +264,24 @@ export default function Toolbox() {
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.subdivision++}>Subdivision</Button>
             </div>
             <div className='toolbox-folder'>
+              <span>Simple Subdivision</span>
+              <Switch
+                defaultChecked={sceneSettings.edit.simpleSubdivision}
+                size='small'
+                onChange={checked => sceneSettings.edit.simpleSubdivision = checked}
+              />
+            </div>
+            <div className='toolbox-folder'>
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.simplification++}>Simplification</Button>
             </div>
             <div className='toolbox-folder'>
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.mergeGeometries++}>Merge Seleted</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.dulplicateMesh++}>Dulplicate Seleted</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.recomputeCenter++}>Recompute Center</Button>
             </div>
           </div>
 
@@ -253,7 +291,7 @@ export default function Toolbox() {
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.unionGeometries++}>Union</Button>
             </div>
             <div className='toolbox-folder'>
-              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.unionGeometries++}>Intersect</Button>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.intersectGeometries++}>Intersect</Button>
             </div>
           </div>
         </>
@@ -265,7 +303,7 @@ export default function Toolbox() {
           <div className='toolbox-folder'>
             <Select
               size='small'
-              defaultValue="translate" style={{ width: '100%' }} onChange={v => sceneSettings.transform.type = v}>
+              defaultValue={sceneSettings.transform.type} style={{ width: '100%' }} onChange={v => sceneSettings.transform.type = v}>
               <Option value="translate">Translate</Option>
               <Option value="rotate">Rotate</Option>
               <Option value="scale">Scale</Option>
@@ -317,7 +355,7 @@ export default function Toolbox() {
             <div className='toolbox-folder'>
               {
                 textures.length ? textures.map((t) => {
-                  const sign = t.type === 'albedo' ? 'T' : t.type === 'normal' ? 'N' : 'D';
+                  const sign = t.type.substring(0, 1).toUpperCase() + t.type.substring(1);
 
                   return <div
                     className='toolbox-texture-img'
@@ -325,6 +363,7 @@ export default function Toolbox() {
                   >
                     <span>{sign}</span>
                     <img
+                      title={t.name}
                       src={t.url}
                       onClick={e => {
                         sceneSettings.action.applyTexture = '';
@@ -336,16 +375,28 @@ export default function Toolbox() {
               }
             </div>
             <div className='toolbox-folder'>
-              <Button size='small' style={{ width: '100%' }} onClick={e => loadTexture('albedo')}>Import Texture</Button>
+              <Button size='small' style={{ width: '100%' }} onClick={e => loadTexture()}>Import Texture</Button>
             </div>
             <div className='toolbox-folder'>
-              <Button size='small' style={{ width: '100%' }} onClick={e => loadTexture('normal')}>Import Normal</Button>
+              <span>Type</span>
+              <Select
+                size='small'
+                style={{ width: '120px' }}
+                defaultValue={sceneSettings.paint.importTextureType}
+                onChange={handleTextureTypeChange}>
+                <Option value={TextureType.albedo}>Albedo</Option>
+                <Option value={TextureType.normal}>Normal</Option>
+                <Option value={TextureType.displace}>Displace</Option>
+                <Option value={TextureType.ao}>AO</Option>
+                <Option value={TextureType.roughness}>Roughness</Option>
+                <Option value={TextureType.metalness}>Metalness</Option>
+              </Select>
             </div>
             <div className='toolbox-folder'>
-              <Button size='small' style={{ width: '100%' }} onClick={e => loadTexture('displace')}>Import Displace</Button>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.loadTexturesInScene++}>Load Scene Textures</Button>
             </div>
             <div className='toolbox-folder'>
-              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.loadTexturesInScene++}>Load All Textures</Button>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.clearAllTexture++}>Clear Textures</Button>
             </div>
           </div>
         </div>
@@ -363,13 +414,19 @@ export default function Toolbox() {
           <div className='toolbox-folder'>
             <Select
               size='small'
-              defaultValue="sculpt" style={{ width: '100%' }} onChange={handleEditModeChange}>
+              defaultValue={sceneSettings.edit.type} style={{ width: '100%' }} onChange={handleEditModeChange}>
               <Option value="sculpt">Sculpt</Option>
               <Option value="addvertex">Add Vertex</Option>
               <Option value="addface">Add Face</Option>
-              <Option value="deletevertex">Delete Face</Option>
+              <Option value="deletevertex">Simplify Face</Option>
+              <Option value="deleteface">Delete Face</Option>
             </Select>
           </div>
+
+          <div className='toolbox-folder'>
+            <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.extractFaces++}>Extract Faces</Button>
+          </div>
+
           {
             mode === 'edit' && editMode === 'sculpt' &&
             <>
@@ -396,6 +453,7 @@ export default function Toolbox() {
         <div className='toolbox-folder'>
           <span>BVH Bounds</span>
           <Switch size='small'
+            defaultChecked={sceneSettings.global.showBVHHelper}
             onChange={checked => {
               sceneSettings.global.showBVHHelper = checked
             }}
@@ -427,10 +485,13 @@ export default function Toolbox() {
           <span>Live Select</span><Switch defaultChecked={sceneSettings.scene.liveSelect} size='small' onChange={checked => sceneSettings.scene.liveSelect = checked} />
         </div>
         <div className='toolbox-folder'>
+          <span>Show BaseMap</span><Switch defaultChecked={sceneSettings.scene.showBaseMap} size='small' onChange={checked => sceneSettings.scene.showBaseMap = checked} />
+        </div>
+        <div className='toolbox-folder'>
           <span>Enable Shadow</span><Switch defaultChecked={sceneSettings.scene.castShadow} size='small' onChange={checked => sceneSettings.scene.castShadow = checked} />
         </div>
         <div className='toolbox-folder'>
-          <span>Direction Light</span><Switch defaultChecked={sceneSettings.scene.showLightHelper} size='small' onChange={checked => sceneSettings.scene.directionLight = checked} />
+          <span>Direction Light</span><Switch defaultChecked={sceneSettings.scene.directionLight} size='small' onChange={checked => sceneSettings.scene.directionLight = checked} />
         </div>
         <div className='toolbox-folder'>
           <span>Light Helper</span><Switch defaultChecked={sceneSettings.scene.showLightHelper} size='small' onChange={checked => sceneSettings.scene.showLightHelper = checked} />

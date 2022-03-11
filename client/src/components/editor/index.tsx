@@ -32,6 +32,22 @@ export default function GenComponnet() {
     <div style={{ position: 'absolute', width: '200px', right: 0, height: '100%', overflowY: 'auto' }}>
       <Toolbox />
     </div>
+    <div style={{
+      position: 'absolute',
+      left: 0,
+      right: 200,
+      height: 23,
+      bottom: 0,
+      textAlign: 'left',
+      padding: '0 10px',
+      backgroundColor: '#eee'
+    }}>
+      <span>
+        {
+          sceneSettings.text.bottomBar
+        }
+      </span>
+    </div>
     <div id="scene" ref={ref} style={{ width: '100vw', height: '100vh' }}></div>
   </div>
 }
@@ -132,7 +148,6 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
 
       if (light instanceof DirectionalLight) {
 
-        console.log(light.shadow.camera)
         light.shadow.camera.top = sceneSettings.scene.shadowMapResolution / 100;
         light.shadow.camera.bottom = -sceneSettings.scene.shadowMapResolution / 100;
         light.shadow.camera.left = -sceneSettings.scene.shadowMapResolution / 100;
@@ -165,7 +180,7 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   });
 
   observe(() => sceneSettings.scene.directionLight, (o, n) => {
-    updateLights(true, false);
+    updateLights(true, true);
   });
 
   observe(() => {

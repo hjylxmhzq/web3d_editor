@@ -17,11 +17,11 @@ export class FlyOrbitControls extends OrbitControls {
 
 			if ( this.enabled ) {
 
-				Object.defineProperty( e, 'shiftKey', { get() {
+				// Object.defineProperty( e, 'shiftKey', { get() {
 
-					return false;
+				// 	return false;
 
-				} } );
+				// } } );
 
 			}
 

@@ -1,8 +1,9 @@
-import { BufferGeometry, ClampToEdgeWrapping, Color, Float32BufferAttribute, Group, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, Object3D, Quaternion, RepeatWrapping, Vector2, Vector3, Wrapping } from "three";
+import { BufferGeometry, ClampToEdgeWrapping, Color, Float32BufferAttribute, Group, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Quaternion, RepeatWrapping, Vector2, Vector3, Wrapping } from "three";
 import { mergeBufferGeometries } from "three/examples/jsm/utils/BufferGeometryUtils";
 import { generateUUID } from "three/src/math/MathUtils";
 import simplifyMesh from "./SimplifyModifierTexture";
 import Delaunator from 'delaunator';
+import { MaterialStaticUtils } from "./MaterialUtils";
 
 
 let _v0 = new Vector3();
@@ -511,6 +512,8 @@ export class GeometryOperator {
 
     hasGroup = false;
 
+    sorted = false;
+
     constructor(public geo: BufferGeometry) {
 
         this.hasGroup = !!geo.groups.length;
@@ -532,6 +535,13 @@ export class GeometryOperator {
             console.warn('no index found in geometry');
 
             index = Array.from({ length: position.count }).map((_, i) => i);
+
+        }
+
+        if (!this.hasGroup) {
+
+            this.geo.addGroup(0, index.length, 0);
+            this.hasGroup = true;
 
         }
 
@@ -612,6 +622,23 @@ export class GeometryOperator {
 
     }
 
+    extractFacesToGroup(faceIndices: number[]) {
+
+        let nextGroupId = this.geo.groups.length;
+
+        let originMaterialIndex = -1;
+
+        for (let faceIndex of faceIndices) {
+
+            originMaterialIndex = this.faces[faceIndex].materialIndex;
+            this.faces[faceIndex].materialIndex = nextGroupId;
+
+        }
+
+        return originMaterialIndex;
+
+    }
+
     searchIndexGroup(index: number) {
 
         const groups = this.geo.groups;
@@ -645,7 +672,7 @@ export class GeometryOperator {
 
         const faces = this.faces.slice();
 
-        if (this.hasGroup) {
+        if (this.hasGroup && !this.sorted) {
 
             faces.sort((f1, f2) => {
 
@@ -677,7 +704,7 @@ export class GeometryOperator {
                             materialIndex: groupId
                         }
 
-                    } else {
+                    } else if (groupId > 0) {
 
                         groups[groupId] = {
                             start: groups[groupId - 1].start + groups[groupId - 1].count,
@@ -690,7 +717,6 @@ export class GeometryOperator {
                 }
 
             }
-
 
             const { v1, v2, v3 } = face;
 
@@ -760,6 +786,18 @@ export class GeometryOperator {
 
     }
 
+    selectFaces(faceIndices: number[]) {
+
+        const newFaces: Triangle[] = [];
+
+        for (let faceIndex of faceIndices) {
+
+            newFaces.push(this.faces[faceIndex]);
+        }
+
+        this.faces = newFaces;
+
+    }
 
     addFace(face: Triangle) {
 
@@ -786,6 +824,140 @@ export class GeometryOperator {
             this.faces[i].id--;
 
         }
+
+    }
+
+    simpleSubdivision(faceIndices?: number[]) {
+
+        if (faceIndices) {
+
+            const newFaces = [];
+
+            for (let i of faceIndices) {
+
+                const face = this.faces[i];
+                const { v1, v2, v3 } = face;
+    
+                const vc1 = GeoStaticUtils.vertexToVector3(v1);
+                const vc2 = GeoStaticUtils.vertexToVector3(v2);
+                const vc3 = GeoStaticUtils.vertexToVector3(v3);
+    
+                const mid12 = new Vector3().addVectors(vc1, vc2).multiplyScalar(0.5);
+                const mid23 = new Vector3().addVectors(vc2, vc3).multiplyScalar(0.5);
+                const mid31 = new Vector3().addVectors(vc3, vc1).multiplyScalar(0.5);
+    
+                const vl = [];
+        
+                for (let nv of [mid12, mid23, mid31]) {
+    
+                    const newVertex = new Vertex(nv.x, nv.y, nv.z);
+                    this.vertices.push(newVertex);
+    
+                    vl.push(newVertex);
+    
+                    if (this.hasUV) {
+    
+                        newVertex.uv = face.getUV(nv);
+    
+                    }
+    
+                }
+
+                const face1 = new Triangle(v1, vl[0], vl[2]);
+                const face2 = new Triangle(v2, vl[1], vl[0]);
+                const face3 = new Triangle(v3, vl[2], vl[1]);
+                const face4 = new Triangle(vl[0], vl[1], vl[2]);
+    
+                for (let f of [face1, face2, face3, face4]) {
+    
+                    f.materialIndex = face.materialIndex;
+                    this.addFace(f);
+                    newFaces.push(f);
+
+                }
+        
+            }
+
+            for (let faceIndex of faceIndices) {
+
+                this.removeFace(this.faces[faceIndex]);
+
+            }
+
+            this.faces.sort((f1, f2) => {
+
+                return f1.materialIndex - f2.materialIndex;
+
+            });
+
+            for (let i = 0; i < this.faces.length; i++) {
+
+                this.faces[i].id = i;
+
+            }
+
+            this.sorted = true;
+
+            return newFaces.map(f => f.id);
+
+        } else {
+
+
+            const newFaces: Triangle[] = [];
+            const newVertices: Vertex[] = [];
+
+            for (let i = 0; i < this.faces.length; i++) {
+
+                const face = this.faces[i];
+                const { v1, v2, v3 } = face;
+    
+                const vc1 = GeoStaticUtils.vertexToVector3(v1);
+                const vc2 = GeoStaticUtils.vertexToVector3(v2);
+                const vc3 = GeoStaticUtils.vertexToVector3(v3);
+    
+                const mid12 = new Vector3().addVectors(vc1, vc2).multiplyScalar(0.5);
+                const mid23 = new Vector3().addVectors(vc2, vc3).multiplyScalar(0.5);
+                const mid31 = new Vector3().addVectors(vc3, vc1).multiplyScalar(0.5);
+    
+                const vl = [];
+    
+                let faceId = 0;
+    
+                for (let nv of [mid12, mid23, mid31]) {
+    
+                    const newVertex = new Vertex(nv.x, nv.y, nv.z);
+                    newVertices.push(newVertex);
+    
+                    vl.push(newVertex);
+    
+                    if (this.hasUV) {
+    
+                        newVertex.uv = face.getUV(nv);
+    
+                    }
+    
+                }
+    
+                const face1 = new Triangle(v1, vl[0], vl[2]);
+                const face2 = new Triangle(v2, vl[1], vl[0]);
+                const face3 = new Triangle(v3, vl[2], vl[1]);
+                const face4 = new Triangle(vl[0], vl[1], vl[2]);
+    
+                for (let f of [face1, face2, face3, face4]) {
+    
+                    f.id = faceId++;
+                    f.materialIndex = face.materialIndex;
+    
+                }
+    
+                newFaces.push(face1, face2, face3, face4);
+    
+            }
+
+            this.faces = newFaces;
+            this.vertices = newVertices;
+        }
+
 
     }
 
@@ -874,8 +1046,23 @@ export class GeometryOperator {
 
     }
 
-
     removeAllJointFacesByFace(faceIndex: number) {
+
+        const face = this.faces[faceIndex];
+
+        const _faces = Array.from(face.searchJointFace());
+
+        for (let f of _faces) {
+
+            f.removeSelfFromJointVertices();
+
+            this.removeFace(f);
+
+        }
+
+    }
+
+    removeAllJointFacesByFaceAndReTriangulation(faceIndex: number) {
 
         const face = this.faces[faceIndex];
 
@@ -1074,6 +1261,53 @@ export class GeometryOperator {
 
 export const GeoStaticUtils = {
 
+    reCenterVertices(mesh: Mesh) {
+
+        const geo = mesh.geometry;
+
+        const positionAttr = geo.getAttribute('position');
+
+        geo.computeBoundingBox();
+
+        const bbox = geo.boundingBox;
+
+        if (!bbox) return;
+
+        const center = new Vector3();
+
+        bbox.getCenter(center);
+
+        const offset = center.multiplyScalar(-1);
+
+        const offsetMatrix = new Matrix4();
+        offsetMatrix.makeTranslation(offset.x, offset.y, offset.z);
+
+        for (let i = 0; i < positionAttr.count; i++) {
+
+            const v = new Vector3().fromBufferAttribute(positionAttr, i);
+
+            v.applyMatrix4(offsetMatrix);
+
+            positionAttr.setXYZ(i, v.x, v.y, v.z);
+
+        }
+
+        mesh.updateMatrix();
+
+        offsetMatrix.invert();
+        const meshMatrix = mesh.matrix.clone();
+        meshMatrix.multiply(offsetMatrix);
+        meshMatrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+        mesh.updateMatrixWorld();
+
+        positionAttr.needsUpdate = true;
+        geo.setAttribute('position', positionAttr);
+
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+
+    },
+
     resolveWrapUV(uv: Vector2, wrapS: Wrapping, wrapT: Wrapping) {
 
 
@@ -1188,6 +1422,79 @@ export const GeoStaticUtils = {
         }
 
         return target.set(0, 0, 0);
+
+    },
+
+    applyMatrix4ToVertices(geo: BufferGeometry, m: Matrix4) {
+
+        const positionAttr = geo.getAttribute('position');
+
+        const v = new Vector3();
+
+        for (let i = 0; i < positionAttr.count; i++) {
+
+            v.fromBufferAttribute(positionAttr, i);
+            v.applyMatrix4(m);
+
+            positionAttr.setXYZ(i, v.x, v.y, v.z);
+
+        }
+
+        geo.setAttribute('position', positionAttr);
+
+    },
+
+    mergeMeshes(meshes: Mesh[]) {
+
+        const geos: BufferGeometry[] = [];
+        const materials: (MeshStandardMaterial | MeshBasicMaterial)[] = [];
+
+        const attrNames = new Set<string>();
+        const deleteAttrNames = new Set<string>();
+
+        meshes.forEach(mesh => {
+            mesh.updateMatrixWorld();
+            const geo = mesh.geometry.clone();
+            for (let attr in geo.attributes) {
+                attrNames.add(attr);
+            }
+            this.applyMatrix4ToVertices(geo, mesh.matrixWorld);
+            geos.push(geo);
+            materials.push(MaterialStaticUtils.getFirstMaterial(mesh) || new MeshStandardMaterial());
+        });
+
+        for (let geo of geos) {
+
+            attrNames.forEach(attrName => {
+
+                if (!(attrName in geo.attributes)) {
+
+                    deleteAttrNames.add(attrName);
+
+                }
+
+            });
+
+        }
+
+        for (let geo of geos) {
+
+            deleteAttrNames.forEach(attrName => {
+
+                console.warn(`attribute [${attrName}] is deleted because it is not exist in all geometry`);
+                geo.deleteAttribute(attrName);
+
+            });
+
+        }
+
+        const newGeo = mergeBufferGeometries(geos, true);
+
+        const newMesh = new Mesh(newGeo, materials);
+
+        this.reCenterVertices(newMesh);
+
+        return newMesh;
 
     }
 }

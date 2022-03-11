@@ -58,6 +58,40 @@ export function observe(fn: () => void, watcher: (oldValue: any, newValue: any) 
 
 }
 
+export function saveSettingToLocalStorage() {
+
+    localStorage.setItem('settings', JSON.stringify(sceneSettingsReactive));
+
+}
+
+export function restoreSettingFromLocalStorage() {
+
+    const settingStr = localStorage.getItem('settings');
+    if (settingStr) {
+        const settings = JSON.parse(settingStr);
+        copy(settings, sceneSettings);
+    }
+
+    function copy(left: any, right: any) {
+        for (let key of Object.keys(left)) {
+            if (typeof left[key] !== 'object' && left[key] !== null) {
+                right[key] = left[key]
+            } else if (right[key]) {
+                copy(left[key], right[key]);
+            }
+        }
+    }
+
+}
+
+export enum TextureType {
+    albedo = 'albedo',
+    displace = 'displace',
+    normal = 'normal',
+    ao = 'ao',
+    roughness = 'roughness',
+    metalness = 'metalness',
+}
 
 const sceneSettings = {
     currentTool: 'move',
@@ -75,6 +109,11 @@ const sceneSettings = {
         closePath: false,
         metalness: 0.5,
         roughness: 0.5,
+        importTextureType: TextureType.albedo,
+    },
+    edit: {
+        type: 'sculpt',
+        simpleSubdivision: false,
     },
     transform: {
         x: 0,
@@ -107,6 +146,12 @@ const sceneSettings = {
         mergeGeometries: 1,
         unionGeometries: 1,
         intersectGeometries: 1,
+        extractFaces: 1,
+        dulplicateMesh: 1,
+        recomputeCenter: 1,
+        exportSceneToGltf: 1,
+        exportSelectedToGltf: 1,
+        clearAllTexture: 1,
     },
     scene: {
         castShadow: true,
@@ -121,10 +166,26 @@ const sceneSettings = {
         backgroundColor: 0xffffff,
         liveSelect: false,
         directionLight: false,
+        baseMapCenterLng: 113.3230163, 
+        baseMapCenterLat: 23.0795448,
+        showBaseMap: false,
+    },
+    text: {
+        bottomBar: `'T': translation; 'G': scale; 'R': rotation; 'WASD': move`,
     }
 }
 
+window.addEventListener('beforeunload', () => {
+
+    saveSettingToLocalStorage();
+
+});
+
+(window as any).saveSettings = saveSettingToLocalStorage;
+
 export type SceneSetting = typeof sceneSettings;
+
+restoreSettingFromLocalStorage();
 
 const sceneSettingsReactive: typeof sceneSettings = makeReactive(sceneSettings);
 

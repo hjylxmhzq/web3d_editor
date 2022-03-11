@@ -7,7 +7,6 @@ class CustomKeyboardEvent {
     public alt = false;
     constructor() {
         window.addEventListener('keydown', (e) => {
-            console.log(e);
             switch (e.key) {
                 case 'Control': this.ctrl = true; break;
                 case 'Shift': this.shift = true; break;

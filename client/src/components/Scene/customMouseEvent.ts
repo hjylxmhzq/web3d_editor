@@ -12,6 +12,8 @@ enum CUSTOM_MOUSE_EVENT {
 class CustomMouseEvent {
   cbs: Record<string, ((e: MouseEvent, ...rest: any[]) => void)[]> = {};
   public mousedown = false;
+  public mouseLeftDown = false;
+  public mouseRightDown = false;
   constructor() {
     let mouseX = -1;
     let mouseY = -1;
@@ -21,6 +23,11 @@ class CustomMouseEvent {
       mouseX = e.clientX;
       mouseY = e.clientY;
       this.mousedown = true;
+      if (e.button === 0) {
+        this.mouseLeftDown = true;
+      } else if (e.button === 2) {
+        this.mouseRightDown = true;
+      }
     }, false);
     window.addEventListener('mousemove', (e) => {
 
@@ -49,6 +56,8 @@ class CustomMouseEvent {
         }
       }
       this.mousedown = false;
+      this.mouseLeftDown = false;
+      this.mouseRightDown = false;
       mouseX = -1;
       mouseY = -1;
     });
