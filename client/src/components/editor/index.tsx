@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AmbientLight, AxesHelper, Color, DirectionalLight, DirectionalLightHelper, Group, Matrix4, OrthographicCamera, PCFSoftShadowMap, PerspectiveCamera, PointLight, PointLightHelper, Scene, sRGBEncoding, Vector3, WebGLRenderer } from 'three';
+import { AmbientLight, AxesHelper, Color, CubeTextureLoader, DirectionalLight, DirectionalLightHelper, Group, Matrix4, OrthographicCamera, PCFSoftShadowMap, PerspectiveCamera, PointLight, PointLightHelper, Scene, sRGBEncoding, Vector3, WebGLRenderer } from 'three';
+import { config } from '../../configs';
 import { useUpdate } from '../../hooks/common';
 import { FlyOrbitControls } from '../Scene/FlyOrbitControls';
 import Toolbar from '../Toolbar';
 import Toolbox from './components/Toolbox';
 import { scene } from './scene';
 import { observe, sceneSettings } from './settings';
+import { loadCubeTexture } from './utils/CubeTexture';
 
 
 export default function GenComponnet() {
@@ -65,14 +67,14 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   const ratio = window.innerWidth / window.innerHeight;
   const orcamRadius = 100
   // const camera = new OrthographicCamera(-orcamRadius * ratio, orcamRadius * ratio, orcamRadius, -orcamRadius, 0, 1000000);
-  const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
+  const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
 
   camera.position.set(50, 50, 50);
   const renderer = new WebGLRenderer({
     alpha: true,
   });
   // renderer.setClearColor(0x000000, 0); // the default
-  renderer.setClearColor(0x000000, 0);
+  renderer.setClearColor(sceneSettings.scene.backgroundColor, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = true;
@@ -88,6 +90,15 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
     renderer,
   };
 
+  function loadBackground() {
+
+  }
+
+  if (sceneSettings.scene.showSkybox) {
+
+    scene.background = loadCubeTexture(sceneSettings.scene.cubeTextureName);
+
+  }
 
   (window as any).clickSim = function (x: number, y: number) {
     clickSim(x, y, renderer.domElement);
@@ -118,6 +129,8 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
       light.shadow.mapSize.height = sceneSettings.scene.shadowMapResolution;
 
       ambLight = new AmbientLight(0xffffff, 1);
+
+      lightGroup.clear();
       lightGroup.add(ambLight);
       lightGroup.add(light);
 
@@ -129,7 +142,7 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
     }
 
     const { lightAngle, lightDistance, lightIntensity, lightDirection, ambientLightIntensity, showLightHelper } = sceneSettings.scene;
-    const lightPos = lightPositionFromAngle(lightAngle, lightDirection);
+    const lightPos = lightPositionFromAngle(new Vector3(1, 0, 0), lightAngle, lightDirection);
     light.position.copy(lightPos).multiplyScalar(lightDistance);
     light.intensity = lightIntensity;
     ambLight.intensity = ambientLightIntensity;
@@ -184,7 +197,7 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   });
 
   observe(() => {
-    const { lightAngle, lightDistance, lightIntensity, lightDirection, ambientLightIntensity } = sceneSettings.scene;
+    const { lightAngle, lightDistance, lightIntensity, lightDirection, ambientLightIntensity, showLightHelper } = sceneSettings.scene;
   }, (o, n) => {
     updateLights();
   });
@@ -194,6 +207,18 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   }, (o, n) => {
     const backgroundColor = sceneSettings.scene.backgroundColor;
     renderer.setClearColor(backgroundColor, 1);
+  });
+
+  observe(() => {
+    let _1 = sceneSettings.scene.showSkybox;
+  }, (o, n) => {
+    const showSkybox = sceneSettings.scene.showSkybox;;
+    if (showSkybox) {
+      scene.background = loadCubeTexture(sceneSettings.scene.cubeTextureName);
+    } else {
+      scene.background = null;
+    }
+
   });
 
   observe(() => {
@@ -220,7 +245,7 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   return threeScene;
 }
 
-function lightPositionFromAngle(angle: number, direction: number) {
+function lightPositionFromAngle(pos: Vector3, angle: number, direction: number) {
 
   const arc = angle / 180 * Math.PI;
   const dirArc = direction / 180 * Math.PI;
@@ -233,7 +258,7 @@ function lightPositionFromAngle(angle: number, direction: number) {
 
   matrix2.multiply(matrix1);
 
-  const v = new Vector3(1, 0, 0);
+  const v = pos.clone();
 
   v.applyMatrix4(matrix2);
 

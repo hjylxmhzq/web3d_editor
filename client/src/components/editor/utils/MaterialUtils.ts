@@ -1,4 +1,4 @@
-import { BufferGeometry, Float32BufferAttribute, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Vector2, Vector3 } from "three";
+import { BufferGeometry, Float32BufferAttribute, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Vector2, Vector3 } from "three";
 import { generateUUID } from "three/src/math/MathUtils";
 import { TextureType } from "../settings";
 import { sceneStorage, TextureInfo } from "../store";
@@ -185,6 +185,36 @@ export const MaterialStaticUtils = {
 
         }
         return uvs;
+    },
+
+    convertToStandardMaterial(mesh: Mesh) {
+
+        const mList = this.getAllMaterial(mesh);
+        if (mList.length === 1) {
+            
+            const m = mList[0];
+            
+            if (!(m instanceof MeshStandardMaterial)) {
+                
+                mesh.material = new MeshStandardMaterial({color: m.color, map: m.map});
+
+            }
+        } else {
+
+            for (let i = 0; i < mList.length; i++) {
+
+                const m = mList[i];
+
+                if (!(m instanceof MeshStandardMaterial)) {
+
+                    (mesh.material as Material[])[i] = new MeshStandardMaterial({color: m.color, map: m.map});
+
+                }
+
+            }
+
+        }
+
     }
 }
 

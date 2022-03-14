@@ -2041,6 +2041,11 @@
   resolved "https://registry.npmmirror.com/@types/delaunator/-/delaunator-5.0.0.tgz#c6be322f0f3eff9fa9f6a5dcaa2ded54913b2d17"
   integrity sha512-00nrXdKbhF9FQsq6MskmdUgEqd5MWzA+x8CoDt8OJqbS4QB528SgkOfEcnQMa2sIg2XTKowwwVQx8iGsAX6CAQ==
 
+"@types/earcut@^2.1.1":
+  version "2.1.1"
+  resolved "https://registry.npmmirror.com/@types/earcut/-/earcut-2.1.1.tgz#573a0af609f17005c751f6f4ffec49cfe358ea51"
+  integrity sha512-w8oigUCDjElRHRRrMvn/spybSMyX8MTkKA5Dv+tS1IE/TgmNZPqUYtvYBXGY8cieSE66gm+szeK+bnbxC2xHTQ==
+
 "@types/eslint@^7.28.2":
   version "7.28.2"
   resolved "https://registry.npmjs.org/@types/eslint/-/eslint-7.28.2.tgz#0ff2947cdd305897c52d5372294e8c76f351db68"
@@ -5105,6 +5110,11 @@ duplexify@^3.4.2, duplexify@^3.6.0:
     inherits "^2.0.1"
     readable-stream "^2.0.0"
     stream-shift "^1.0.0"
+
+earcut@^2.2.3:
+  version "2.2.3"
+  resolved "https://registry.npmmirror.com/earcut/-/earcut-2.2.3.tgz#d44ced2ff5a18859568e327dd9c7d46b16f55cf4"
+  integrity sha512-iRDI1QeCQIhMCZk48DRDMVgQSSBDmbzzNhnxIo+pwx3swkfjMh6vh0nWLq1NdvGHLKH6wIrAM3vQWeTj6qeoug==
 
 ecc-jsbn@~0.1.1:
   version "0.1.2"

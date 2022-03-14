@@ -60,7 +60,14 @@ export function observe(fn: () => void, watcher: (oldValue: any, newValue: any) 
 
 export function saveSettingToLocalStorage() {
 
-    localStorage.setItem('settings', JSON.stringify(sceneSettingsReactive));
+    localStorage.setItem('settings',
+        JSON.stringify(
+            sceneSettingsReactive,
+            (key, value) => {
+                return ignoreKey.indexOf(key) !== -1 ? undefined : value;
+            }
+        )
+    );
 
 }
 
@@ -69,7 +76,11 @@ export function restoreSettingFromLocalStorage() {
     const settingStr = localStorage.getItem('settings');
     if (settingStr) {
         const settings = JSON.parse(settingStr);
-        copy(settings, sceneSettings);
+        if (settings.version === sceneSettings.version) {
+            copy(settings, sceneSettings);
+        } else {
+            localStorage.removeItem('settings');
+        }
     }
 
     function copy(left: any, right: any) {
@@ -91,9 +102,14 @@ export enum TextureType {
     ao = 'ao',
     roughness = 'roughness',
     metalness = 'metalness',
+    emissive = 'emissive',
+    alpha = 'alpha',
 }
 
+const ignoreKey = ['text'];
+
 const sceneSettings = {
+    version: 1,
     currentTool: 'move',
     sculpt: {
         size: 0.2,
@@ -137,6 +153,7 @@ const sceneSettings = {
     },
     action: {
         importModel: 1,
+        importGeoJson: 1,
         saveTo3DTiles: 1,
         importTexture: 1,
         loadTexturesInScene: 1,
@@ -152,6 +169,8 @@ const sceneSettings = {
         exportSceneToGltf: 1,
         exportSelectedToGltf: 1,
         clearAllTexture: 1,
+        applyEnvMap: 1,
+        convertToPBRMaterial: 1,
     },
     scene: {
         castShadow: true,
@@ -165,13 +184,22 @@ const sceneSettings = {
         showLightHelper: false,
         backgroundColor: 0xffffff,
         liveSelect: false,
-        directionLight: false,
-        baseMapCenterLng: 113.3230163, 
-        baseMapCenterLat: 23.0795448,
+        directionLight: true,
+        baseMapCenterLng: -74.00516319107578,
+        baseMapCenterLat: 40.71124243527472,
+        baseMapZoomLevel: 18,
+        baseMapBrightness: 0.5,
         showBaseMap: false,
+        showSkybox: false,
+        cubeTextureName: 'sky_1',
     },
     text: {
-        bottomBar: `'T': translation; 'G': scale; 'R': rotation; 'WASD': move`,
+        loading: -1,
+        loadingText: '',
+        bottomBar: `'T': translation; 'G': scale; 'R': rotation; 'WASD': move; 'Alt': range selection`,
+        currentUserData: {
+
+        }
     }
 }
 

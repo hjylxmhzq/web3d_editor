@@ -12,6 +12,14 @@ export function getCanvas(width?: number, height?: number, renew = false, clear 
 
         }
 
+        if (clear) {
+            const ctx = offscreenCanvas.getContext('2d');
+            if (ctx) {
+                ctx.fillStyle = '#' + clearColor.toString(16);
+                ctx.fillRect(0, 0, width, height);
+            }
+        }
+        
         offscreenCanvas.width = width;
         offscreenCanvas.height = height;
 

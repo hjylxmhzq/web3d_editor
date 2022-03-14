@@ -2,12 +2,10 @@ import React, { ChangeEventHandler, FormEventHandler, useEffect, useRef, useStat
 import { useUpdate } from '../../../hooks/common';
 import { observe, sceneSettings, TextureType } from '../settings';
 import './Toolbox.scss';
-import { Switch, Radio, RadioChangeEvent, Select, Slider, Button } from 'antd';
+import { Switch, Radio, RadioChangeEvent, Select, Slider, Button, Table, Progress } from 'antd';
 import { getCanvas } from '../utils/canvas';
 import { sceneStorage } from '../store';
 import { loadFile } from '../utils/Files';
-import axios from 'axios';
-import { config } from '../../../configs';
 import { loadOnlineTexture } from '../../api/io';
 
 const { Option } = Select;
@@ -20,6 +18,7 @@ export default function Toolbox() {
   const [editMode, setEditMode] = useState(sceneSettings.edit.type);
   const [canvasVisible, setCanvasVisible] = useState(false);
   const [textures, setTextures] = useState<({ name: string, url: string, type: TextureType })[]>([]);
+  const [infoTable, setInfoTable] = useState<{ columns: any[], data: any[] }>({ columns: [], data: [] });
 
 
   function updateTextures() {
@@ -69,6 +68,38 @@ export default function Toolbox() {
     })()
 
     observe(() => {
+      let _1 = sceneSettings.text.currentUserData;
+    }, () => {
+
+      const userData = sceneSettings.text.currentUserData;
+
+      const columns = [
+        {
+          title: 'key',
+          dataIndex: 'key',
+          width: 80,
+          ellipsis: true,
+        },
+        {
+          title: 'value',
+          dataIndex: 'value',
+          width: 100,
+          ellipsis: true,
+        }
+      ];
+
+      const data = Object.entries(userData).map(([key, value]) => {
+        return {
+          key,
+          value,
+        }
+      });
+
+      setInfoTable({ columns, data });
+
+    });
+
+    observe(() => {
 
       let _1 = sceneSettings.currentTool;
       let _2 = sceneSettings.sculpt;
@@ -81,6 +112,11 @@ export default function Toolbox() {
       let _8 = sceneSettings.transform.type;
       let _9 = sceneSettings.edit;
       let _10 = sceneSettings.paint.importTextureType;
+      let _11 = sceneSettings.scene.baseMapCenterLat;
+      let _12 = sceneSettings.scene.baseMapCenterLng;
+      let _15 = sceneSettings.scene.showBaseMap;
+      let _13 = sceneSettings.text.loading;
+      let _14 = sceneSettings.text.loadingText;
 
     }, () => {
 
@@ -182,6 +218,9 @@ export default function Toolbox() {
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.importModel++}>Load Model</Button>
         </div>
         <div className='toolbox-folder'>
+          <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.importGeoJson++}>Load GeoJSON</Button>
+        </div>
+        <div className='toolbox-folder'>
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.exportSceneToGltf++}>Export Scene</Button>
         </div>
         <div className='toolbox-folder'>
@@ -191,6 +230,18 @@ export default function Toolbox() {
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.saveTo3DTiles++}>Generate 3DTiles</Button>
         </div>
       </div>
+
+      {
+        sceneSettings.text.loading !== -1 ?
+          <div className='toolbox-outfolder'>
+            <div className='toolbox-outfolder-title'>Tasks</div>
+            <div className='toolbox-folder'>
+              <span>{sceneSettings.text.loadingText}</span>
+              <Progress percent={sceneSettings.text.loading * 100 >> 0} size="small" />
+            </div>
+          </div>
+          : null
+      }
 
       <div className='toolbox-outfolder'>
         <div className='toolbox-outfolder-title'>Mesh Information</div>
@@ -352,7 +403,7 @@ export default function Toolbox() {
           </div>
           <div className='toolbox-outfolder'>
             <div className='toolbox-outfolder-title'>Textures</div>
-            <div className='toolbox-folder'>
+            <div className='toolbox-folder' style={{ maxHeight: 300, overflow: 'auto' }}>
               {
                 textures.length ? textures.map((t) => {
                   const sign = t.type.substring(0, 1).toUpperCase() + t.type.substring(1);
@@ -390,6 +441,8 @@ export default function Toolbox() {
                 <Option value={TextureType.ao}>AO</Option>
                 <Option value={TextureType.roughness}>Roughness</Option>
                 <Option value={TextureType.metalness}>Metalness</Option>
+                <Option value={TextureType.emissive}>Emissive</Option>
+                <Option value={TextureType.alpha}>Alpha</Option>
               </Select>
             </div>
             <div className='toolbox-folder'>
@@ -397,6 +450,12 @@ export default function Toolbox() {
             </div>
             <div className='toolbox-folder'>
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.clearAllTexture++}>Clear Textures</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.applyEnvMap++}>Apply Env Texture</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.convertToPBRMaterial++}>Convert To PBR</Button>
             </div>
           </div>
         </div>
@@ -482,11 +541,46 @@ export default function Toolbox() {
       <div className='toolbox-outfolder'>
         <div className='toolbox-outfolder-title'>Scene Options</div>
         <div className='toolbox-folder'>
+          <span>Center X:</span>
+          <input
+            type='number'
+            onChange={e => sceneSettings.scene.baseMapCenterLng = parseFloat(e.target.value)}
+            value={sceneSettings.scene.baseMapCenterLng}
+            style={{
+              width: 100,
+              height: 25,
+              border: 'none'
+            }} />
+        </div>
+        <div className='toolbox-folder'>
+          <span>Center Y:</span>
+          <input
+            type='number'
+            onChange={e => sceneSettings.scene.baseMapCenterLat = parseFloat(e.target.value)}
+            value={sceneSettings.scene.baseMapCenterLat}
+            style={{
+              width: 100,
+              height: 25,
+              border: 'none'
+            }} />
+        </div>
+        <div className='toolbox-folder'>
           <span>Live Select</span><Switch defaultChecked={sceneSettings.scene.liveSelect} size='small' onChange={checked => sceneSettings.scene.liveSelect = checked} />
         </div>
         <div className='toolbox-folder'>
           <span>Show BaseMap</span><Switch defaultChecked={sceneSettings.scene.showBaseMap} size='small' onChange={checked => sceneSettings.scene.showBaseMap = checked} />
         </div>
+        <div className='toolbox-folder'>
+          <span>Show Skybox</span><Switch defaultChecked={sceneSettings.scene.showSkybox} size='small' onChange={checked => sceneSettings.scene.showSkybox = checked} />
+        </div>
+        {
+          sceneSettings.scene.showBaseMap ?
+            <div className='toolbox-folder'>
+              <div>Map Brightness</div>
+              <Slider style={{ flexGrow: 1 }} defaultValue={sceneSettings.scene.baseMapBrightness} step={0.05} min={0} max={1} onChange={value => sceneSettings.scene.baseMapBrightness = value} />
+            </div>
+            : null
+        }
         <div className='toolbox-folder'>
           <span>Enable Shadow</span><Switch defaultChecked={sceneSettings.scene.castShadow} size='small' onChange={checked => sceneSettings.scene.castShadow = checked} />
         </div>
@@ -510,7 +604,7 @@ export default function Toolbox() {
         </div>
         <div className='toolbox-folder'>
           <div>Light Distance</div>
-          <Slider style={{ flexGrow: 1 }} defaultValue={sceneSettings.scene.lightDistance} min={10} max={1000} onChange={value => sceneSettings.scene.lightDistance = value} />
+          <Slider style={{ flexGrow: 1 }} defaultValue={sceneSettings.scene.lightDistance} min={10} max={5000} onChange={value => sceneSettings.scene.lightDistance = value} />
         </div>
         <div className='toolbox-folder'>
           <div>Light Intensity</div>
@@ -537,6 +631,18 @@ export default function Toolbox() {
       </div>
 
     </div>
+    {
+      infoTable.data.length ?
+        <div className='toolbox-infotable'>
+          <Table
+
+            columns={infoTable.columns}
+            dataSource={infoTable.data}
+            pagination={false}
+            size="small" />
+        </div>
+        : null
+    }
   </div >
 }
 

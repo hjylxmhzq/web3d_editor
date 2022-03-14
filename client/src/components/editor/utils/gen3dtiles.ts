@@ -1,4 +1,4 @@
-import { Group, Matrix4, Mesh, MeshBasicMaterial } from "three";
+import { EventDispatcher, Group, Matrix4, Mesh, MeshBasicMaterial } from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter";
 import { Octree, OctreeNode } from "./Octree";
 
@@ -27,13 +27,15 @@ interface LocalFile {
     blob: Blob;
 }
 
-export async function saveToLocal(files: LocalFile[]) {
+export async function saveToLocal(files: LocalFile[], onProgress?: (finished: number, total: number) => void) {
 
     if (!dirHandle) {
         await initFileSystem();
     }
 
     console.log(dirHandle);
+
+    let idx = 0;
 
     for (let file of files) {
         console.time('write ' + file.name);
@@ -42,6 +44,8 @@ export async function saveToLocal(files: LocalFile[]) {
         await ws.write(file.blob);
         await ws.close();
         console.timeEnd('write ' + file.name);
+        idx++;
+        onProgress && onProgress(idx, files.length);
     }
 
     // const url = URL.createObjectURL(blob);
@@ -66,12 +70,15 @@ interface TileNode {
     refine: 'ADD' | 'REPLACE'
 }
 
-export class TilesGenerator {
+
+export class TilesGenerator extends EventDispatcher {
     fileList: LocalFile[] = [];
     finished = false;
+    objectCount = 0;
+    finishedObjectCount = 0;
 
     constructor() {
-
+        super();
     }
 
     collectFile(file: Blob, filename: string) {
@@ -86,6 +93,7 @@ export class TilesGenerator {
         this.fileList = [];
         this.finished = false;
 
+        this.objectCount = octree.objects.length;
         const tileRoot = await this.processNode(octree.root);
 
         const tileset = {
@@ -137,29 +145,43 @@ export class TilesGenerator {
 
         if (ocNode.objects.length) {
             const group = new Group();
-
+            
             for (let obj of ocNode.objects) {
-
+                
+                this.finishedObjectCount++;
+                
                 const obj3d = obj.object;
 
                 const obj3dCloned = obj3d.clone();
 
-                if (obj3d.parent) {
+                // if (obj3d.parent) {
 
-                    obj3d.parent.updateMatrixWorld();
+                //     obj3d.parent.updateMatrixWorld();
 
-                    const matrixWorld = obj3d.parent.matrixWorld as Matrix4;
+                //     const matrixWorld = obj3d.parent.matrixWorld as Matrix4;
 
-                    if (!isIdentityMatrix(matrixWorld)) {
+                //     if (!isIdentityMatrix(matrixWorld)) {
 
-                        obj3dCloned.applyMatrix4(matrixWorld);
+                //         obj3dCloned.applyMatrix4(matrixWorld);
 
-                    }
+                //     }
+
+                // }
+
+                obj3d.updateMatrixWorld();
+
+                const matrixWorld = obj3d.matrixWorld as Matrix4;
+
+                if (!isIdentityMatrix(matrixWorld)) {
+
+                    obj3dCloned.applyMatrix4(matrixWorld);
 
                 }
 
+
                 group.children.push(obj3dCloned);
 
+                this.dispatchEvent({ type: 'progress' });
             }
 
             const filename = ocNodeId + '.b3dm';

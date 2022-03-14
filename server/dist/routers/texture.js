@@ -12,6 +12,9 @@ const textureType = {
     'height': 'displace',
     'roughness': 'roughness',
     'normal': 'normal',
+    'emissive': 'emissive',
+    'metallic': 'metalness',
+    'alpha': 'alpha',
 };
 router_1.default.get('/gettextures', async (ctx, next) => {
     const texturePath = path_1.default.join(__dirname, '../../resources/textures');

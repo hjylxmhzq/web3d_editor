@@ -22,3 +22,21 @@ export function loadFile(accept: string = '*/*'): Promise<File> {
     })
 
 }
+
+export function readFileToString(blob: Blob) {
+
+    const fr = new FileReader();
+
+    return new Promise<string>((resolve, reject) => {
+
+        fr.onload = function() {
+
+            resolve(fr.result as string);
+        
+        }
+
+        fr.readAsText(blob);
+
+    });
+
+}

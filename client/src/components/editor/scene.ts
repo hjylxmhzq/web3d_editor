@@ -1,7 +1,7 @@
 import { SceneInfo } from './index';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
-import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide, ConeBufferGeometry } from 'three';
+import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide, ConeBufferGeometry, RepeatWrapping } from 'three';
 import EventEmitter from 'events';
 import { CustomTransformControls } from '../Scene/CustomTransformControls';
 import { FlyOrbitControls } from '../Scene/FlyOrbitControls';
@@ -11,7 +11,7 @@ import { Octree } from './utils/Octree';
 import { SimplifyModifier } from './utils/SimplifyModifier';
 import { SimplifyModifier as SimplifyModifierOrigin } from './utils/SimplifyModifierOrigin';
 import simplifyMesh from './utils/SimplifyModifierTexture';
-import { saveToLocal, TilesGenerator } from './utils/gen3dtiles';
+import { saveToLocal, TilesGenerator, initFileSystem } from './utils/gen3dtiles';
 import { MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree, SplitStrategy, SAH, CENTER, AVERAGE } from 'three-mesh-bvh';
 import { MeshBVHVisualizer } from './utils/MeshBVHVisializer';
 import { createMeshEdge, GeometryOperator, GeoStaticUtils, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
@@ -25,24 +25,16 @@ import { getTrianglesHighlightMesh, updateHighlightTriangle } from './utils/High
 import { getCanvas, isCanvas } from './utils/canvas';
 import { MaterialStaticUtils } from './utils/MaterialUtils';
 import { disableShadow, enableShadow, raycastMesh } from './utils/SceneUtils';
-import { loadFile } from './utils/Files';
+import { loadFile, readFileToString } from './utils/Files';
 import { sceneStorage } from './store';
 import { SelectionBoxHelper } from './utils/SelectBoxHelper';
 import { rectCast } from './utils/rectCast';
 import { CSG } from 'three-csg-ts';
 import { exportGLTF } from './utils/exporter';
-import { createBaseMapPlane } from './utils/baseMap';
-
-const saveBtn = document.createElement('button');
-
-saveBtn.style.position = 'fixed';
-
-saveBtn.style.left = '20px';
-saveBtn.style.top = '20px';
-saveBtn.innerHTML = 'SAVE'
-
-document.body.append(saveBtn);
-
+import { BaseMap, createBaseMapPlane } from './utils/BaseMap';
+import { parseGeoJson } from './utils/GeoJsonLoader';
+import { projectFromLonLat } from './utils/projections';
+import { loadCubeTexture } from './utils/CubeTexture';
 
 const renderEvent = new EventEmitter();
 
@@ -244,10 +236,20 @@ export async function scene(si: SceneInfo) {
 
   observe(() => sceneSettings.scene.showBaseMap, () => {
     if (sceneSettings.scene.showBaseMap) {
-      let baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, 18);
+      baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, sceneSettings.scene.baseMapZoomLevel);
+      console.log('baseMap plane', baseMapPlane);
       baseMapGroup.add(baseMapPlane);
     } else {
       baseMapGroup.clear();
+    }
+  });
+
+  observe(() => sceneSettings.scene.baseMapBrightness, () => {
+    if (sceneSettings.scene.showBaseMap && baseMapPlane) {
+      const brightness = sceneSettings.scene.baseMapBrightness;
+      const r = brightness * 0xff;
+      const hex = '#' + r.toString(16).substring(0, 2).repeat(3);
+      (baseMapPlane.material as MeshBasicMaterial).color = new Color(hex);
     }
   });
 
@@ -257,6 +259,15 @@ export async function scene(si: SceneInfo) {
         updateMeshEdge();
       }
     }
+  });
+
+  observe(() => {
+    let _1 = sceneSettings.scene.baseMapCenterLat;
+    let _2 = sceneSettings.scene.baseMapCenterLng;
+  }, (o, n) => {
+    const { baseMapCenterLat: lat, baseMapCenterLng: lon, baseMapZoomLevel: level } = sceneSettings.scene;
+    baseMapGroup.clear();
+    baseMapGroup.add(createBaseMapPlane(lon, lat, level));
   });
 
   observe(() => sceneSettings.action.recomputeCenter, (o, n) => {
@@ -274,10 +285,44 @@ export async function scene(si: SceneInfo) {
     }
   });
 
+  observe(() => sceneSettings.action.saveTo3DTiles, async () => {
+    const tilesGenerator = new TilesGenerator();
+
+    tilesGenerator.addEventListener('progress', () => {
+      sceneSettings.text.loading = tilesGenerator.finishedObjectCount / tilesGenerator.objectCount;
+      console.log(sceneSettings.text.loading)
+    });
+    sceneSettings.text.loadingText = 'Generating 3D Tiles';
+    await initFileSystem();
+    await tilesGenerator.gen3dTile(octree);
+    sceneSettings.text.loadingText = 'Writing Files';
+    await saveToLocal(tilesGenerator.fileList, (finished, total) => {
+      sceneSettings.text.loading = finished / total;
+    });
+    setTimeout(() => {
+      sceneSettings.text.loading = -1;
+    }, 1000);
+  });
+
   observe(() => sceneSettings.action.importModel, async (o, n) => {
     const file = await loadFile('.glb');
     const url = URL.createObjectURL(file);
     const model = await loadGltf(scene, url);
+    model.traverse(obj => {
+      if (obj instanceof Mesh) {
+        octree.add(obj);
+      }
+    });
+    group.add(model);
+  });
+
+  observe(() => sceneSettings.action.importGeoJson, async (o, n) => {
+    const file = await loadFile('.json');
+    const jsonStr = await readFileToString(file);
+    const { baseMapCenterLat: lat, baseMapCenterLng: lon } = sceneSettings.scene;
+    const [x, y] = projectFromLonLat(lon, lat);
+    const center = new Vector2(x, y);
+    const model = parseGeoJson(jsonStr, center);
     model.traverse(obj => {
       if (obj instanceof Mesh) {
         octree.add(obj);
@@ -416,21 +461,49 @@ export async function scene(si: SceneInfo) {
   });
 
   observe(() => {
+    let _ = sceneSettings.action.applyEnvMap
+  }, async (o, n) => {
+    if (selectedMeshRef.current) {
+      const mList = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
+      for (let m of mList) {
+        if (m instanceof MeshStandardMaterial) {
+          m.envMap = loadCubeTexture(sceneSettings.scene.cubeTextureName);
+          m.envMapIntensity = 0.5;
+        }
+      }
+    }
+  });
+
+  observe(() => {
+    let _ = sceneSettings.action.convertToPBRMaterial
+  }, async (o, n) => {
+    if (selectedMeshRef.current) {
+      MaterialStaticUtils.convertToStandardMaterial(selectedMeshRef.current);
+    }
+  });
+
+  observe(() => {
     let _ = sceneSettings.action.clearAllTexture
   }, async (o, n) => {
     if (selectedMeshRef.current) {
       const materials = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
-      for (let m of materials) {
+      
+      for (let i = 0; i < materials.length; i++) {
+        const m = materials[i];
         const cvs = getCanvas(10, 10, false, true, 0xdddddd);
         const imageBitMap = await createImageBitmap(cvs);
         m.map && (m.map.image = imageBitMap);
         m.map && (m.map.needsUpdate = true);
         m.aoMap = null;
+        m.alphaMap = null;
         if (m instanceof MeshStandardMaterial) {
           m.normalMap = null;
           m.roughnessMap = null;
           m.metalnessMap = null;
           m.displacementMap = null;
+          m.emissiveMap = null;
+          m.emissive = new Color(0x000000);
+          m.envMap = null;
         }
         m.needsUpdate = true;
       }
@@ -457,7 +530,7 @@ export async function scene(si: SceneInfo) {
     if (!material.map) {
 
       const m = MaterialStaticUtils.getFirstMaterial(selectedMeshRef.current);
-      material.map = new Texture();
+      material.map = new Texture(undefined, undefined, RepeatWrapping, RepeatWrapping);
       material.needsUpdate = true;
 
     }
@@ -499,7 +572,7 @@ export async function scene(si: SceneInfo) {
           for (let m of mList) {
 
             const t = m.map;
-  
+
             if (t) {
               t.image = imgBitMap;
               t.needsUpdate = true;
@@ -607,6 +680,50 @@ export async function scene(si: SceneInfo) {
 
           }
 
+        } else if (texture.type === TextureType.emissive) {
+
+          for (let m of mList) {
+
+            if (m instanceof MeshStandardMaterial) {
+
+              const emissiveMap = m.map?.clone() || new Texture();
+
+              emissiveMap.image = imgBitMap;
+
+              emissiveMap.needsUpdate = true;
+
+              m.emissiveMap = emissiveMap;
+
+              m.emissive = new Color(0xffffff);
+
+              m.needsUpdate = true;
+
+            }
+
+          }
+
+        } else if (texture.type === TextureType.alpha) {
+
+          for (let m of mList) {
+
+            if (m instanceof MeshStandardMaterial) {
+
+              const alphaMap = m.map?.clone() || new Texture();
+
+              alphaMap.image = imgBitMap;
+
+              alphaMap.needsUpdate = true;
+
+              m.alphaMap = alphaMap;
+
+              m.transparent = true;
+
+              m.needsUpdate = true;
+
+            }
+
+          }
+
         }
 
       }
@@ -657,10 +774,15 @@ export async function scene(si: SceneInfo) {
   let brushHelper = createBrushHelper();
   let paintBrushHelper = createPaintBrushMesh();
   let trianglesHighlightHelper = new Group();
+  let baseMapPlane: Mesh;
 
   if (sceneSettings.scene.showBaseMap) {
 
-    let baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, 18);
+    baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, sceneSettings.scene.baseMapZoomLevel);
+    const brightness = sceneSettings.scene.baseMapBrightness;
+    const r = brightness * 0xff;
+    const hex = '#' + r.toString(16).substring(0, 2).repeat(3);
+    (baseMapPlane.material as MeshBasicMaterial).color = new Color(hex);
     baseMapGroup.add(baseMapPlane);
 
   }
@@ -694,8 +816,6 @@ export async function scene(si: SceneInfo) {
   });
 
   octree.helperGroup.visible = sceneSettings.global.showOctreeHelper;
-
-  const tilesGenerator = new TilesGenerator();
 
   const subdivisionModifier = new SubdivisionModifier(1);
 
@@ -1276,6 +1396,12 @@ export async function scene(si: SceneInfo) {
 
         console.log(firstCast);
 
+        if (firstCast.userData) {
+
+          sceneSettings.text.currentUserData = firstCast.userData;
+
+        }
+
         selectedMeshRef.current = firstCast;
 
         selectedMeshRef.current.updateMatrixWorld();
@@ -1351,7 +1477,7 @@ export async function scene(si: SceneInfo) {
         selectedMeshRef.current.geometry.boundsTree = undefined;
 
       }
-
+      sceneSettings.text.currentUserData = {};
       selectedMeshRef.current = undefined;
       transformControl.detach();
       flyOrbitControls.enabled = true;
@@ -1507,14 +1633,6 @@ export async function scene(si: SceneInfo) {
   group.traverse(m => {
     if (m instanceof Mesh) {
       octree.add(m);
-    }
-  });
-
-  saveBtn.addEventListener('click', async () => {
-    if (!tilesGenerator.fileList.length) {
-      await tilesGenerator.gen3dTile(octree);
-    } else {
-      await saveToLocal(tilesGenerator.fileList);
     }
   });
 

@@ -13,6 +13,9 @@ const textureType: Record<string, string> = {
     'height': 'displace',
     'roughness': 'roughness',
     'normal': 'normal',
+    'emissive': 'emissive',
+    'metallic': 'metalness',
+    'alpha': 'alpha',
 };
 
 router.get('/gettextures', async (ctx, next) => {

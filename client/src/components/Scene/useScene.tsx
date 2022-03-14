@@ -87,10 +87,10 @@ function setupThreeJs(el: HTMLCanvasElement): SceneInfo {
 function load3DTile(threeScene: SceneInfo, resource: string) {
   const { camera, scene, renderer } = threeScene;
   const tilesRenderer = new DebugTilesRenderer(resource);
-  // tilesRenderer.displayBoxBounds = true;
+  tilesRenderer.displayBoxBounds = true;
   tilesRenderer.maxDepth = 2;
   tilesRenderer.onLoadTileSet = () => {
-    moveToTile(tilesRenderer);
+    // moveToTile(tilesRenderer);
   }
   tilesRenderer.onLoadModel = (scene, tile) => {
     scene.traverse(m => {
@@ -133,8 +133,8 @@ export default function useScene(ref: RefObject<HTMLCanvasElement>) {
     (window as any).ts = threeScene;
 
     setSceneInfo(threeScene);
-    // const tilesRenderer = load3DTile(threeScene, 'http://127.0.0.1:8999/3dtiles/3dtile_octree/tileset.json');
-    const tilesRenderer = load3DTile(threeScene, 'http://127.0.0.1:8999/3dtiles/test_data3/tileset.json');
+    const tilesRenderer = load3DTile(threeScene, 'http://127.0.0.1:8999/3dtiles/3dtile_octree/tileset.json');
+    // const tilesRenderer = load3DTile(threeScene, 'http://127.0.0.1:8999/3dtiles/test_data3/tileset.json');
 
     const { scene, camera, renderer } = threeScene;
 
