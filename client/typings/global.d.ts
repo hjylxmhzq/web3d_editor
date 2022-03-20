@@ -1,12 +1,7 @@
-// // import { BufferGeometry } from "three"
-// import { BufferGeometry } from "three";
-// import { computeBoundsTree, disposeBoundsTree } from "three-mesh-bvh"
+declare module 'three/src/materials/MeshStandardMaterial' {
 
-// declare module 'three' {
+    export interface MeshStandardMaterial {
+        originMap?: ImageBitmap
+    }
 
-//     export class BufferGeometryWithTree extends BufferGeometry {
-//         computeBoundsTree: computeBoundsTree;
-//         disposeBoundsTree: disposeBoundsTree;
-//     }
-
-// }
+}

@@ -2,10 +2,11 @@ import { CanvasTexture, ClampToEdgeWrapping, Color, Face, Material, Matrix4, Mes
 import { CONTAINED, INTERSECTED, MeshBVH, NOT_INTERSECTED } from "three-mesh-bvh";
 import { customMouseEvent } from "../../Scene/customMouseEvent";
 import { sceneSettings } from "../settings";
-import { getCanvas, isCanvas } from "./canvas";
+import { getCanvas, getDrawCanvas, isCanvas } from "./canvas";
 import { GeoStaticUtils } from "./GeometryUtils";
 import { MaterialStaticUtils } from "./MaterialUtils";
 import { minMax } from "./MathUtilities";
+import { sceneHistory } from "./SceneHistory";
 
 
 const _v2 = new Vector2();
@@ -155,21 +156,18 @@ async function restoreBitMapTexture() {
 
         pending = true;
 
+
         const bitmap = await createImageBitmap(lastMaterial.map.image, {
             imageOrientation: lastMaterial.map.flipY ? 'flipY' : 'none',
         });
 
-        if (lastMaterial) {
+        lastMaterial.map.image && (lastMaterial.map.image = bitmap);
 
-            lastMaterial.map.image && (lastMaterial.map.image = bitmap);
+        lastMaterial.map.needsUpdate = true;
 
-            lastMaterial.map.needsUpdate = true;
+        lastMaterial.needsUpdate = true;
 
-            lastMaterial.needsUpdate = true;
-
-            lastMaterial = null;
-
-        }
+        lastMaterial = null;
 
         pending = false;
 
@@ -177,9 +175,29 @@ async function restoreBitMapTexture() {
 
 }
 
+function updateTextureHistory() {
+    
+    if (lastMaterial && lastMaterial.map && isCanvas(lastMaterial.map.image)) {
+
+        const { width, height } = lastMaterial.map.image;
+
+        const cvs = getCanvas();
+        const curCtx = cvs.getContext('2d') as CanvasRenderingContext2D;
+
+        const ctx = beforeImage.getContext('2d') as CanvasRenderingContext2D;
+        const beforeImageData = ctx.getImageData(0, 0, width, height);
+        const curImageData = curCtx.getImageData(0, 0, width, height);
+
+        sceneHistory.addTextureChange(lastMaterial, beforeImageData, curImageData);
+    
+    }
+
+}
+
 
 customMouseEvent.onMouseUp(() => {
-
+    
+    updateTextureHistory();
     restoreBitMapTexture();
     begin = true;
 
@@ -187,7 +205,7 @@ customMouseEvent.onMouseUp(() => {
 
 const lastPos = new Vector3();
 const lastUVPos = new Vector2();
-
+let beforeImage = getCanvas(1000, 1000, true);
 
 export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh: Mesh, params: PaintParams) {
 
@@ -213,6 +231,22 @@ export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh
 
         restoreBitMapTexture();
         return;
+
+    }
+
+    if (m !== lastMaterial) {
+
+        if (m.map?.image) {
+
+            beforeImage.width = m.map.image.width;
+            beforeImage.height = m.map.image.height;
+
+            setTimeout(() => {
+                const ctx = beforeImage.getContext('2d');
+                m.map && ctx?.drawImage(m.map.image, 0, 0);
+            }, 0);
+
+        }
 
     }
 
@@ -285,9 +319,12 @@ export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh
 
             if (isCanvas(m.map.image)) {
 
-                const ctx = m.map.image.getContext('2d') as CanvasRenderingContext2D;
 
-                if (ctx) {
+                const ctx = m.map.image.getContext('2d') as CanvasRenderingContext2D;
+                const drawCanvas = getDrawCanvas();
+                const drawCtx = drawCanvas.getContext('2d') as CanvasRenderingContext2D;
+
+                if (ctx && drawCtx) {
 
                     // const avgDis3D = point.distanceTo(vertices[0]) + point.distanceTo(vertices[1]) + point.distanceTo(vertices[2]);
                     // const avgDis2D = _v2.distanceTo(uvs[0]) + _v2.distanceTo(uvs[1]) + _v2.distanceTo(uvs[2]);
@@ -318,12 +355,12 @@ export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh
 
                     if (begin || lastUVPos.distanceTo(_v2) > 0.5) {
 
-                        ctx.beginPath();
+                        drawCtx.beginPath();
                         begin = false;
 
                         if (!sceneSettings.paint.closePath) {
 
-                            ctx.moveTo(x, y);
+                            drawCtx.moveTo(x, y);
 
                         }
 
@@ -331,18 +368,20 @@ export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh
 
                     if (sceneSettings.paint.closePath) {
 
-                        ctx.fillStyle = '#' + sceneSettings.paint.color.toString(16);
-                        ctx.arc(x, y, 1, 0, 2 * Math.PI);
-                        ctx.fill();
+                        drawCtx.fillStyle = '#' + sceneSettings.paint.color.toString(16);
+                        drawCtx.arc(x, y, 1, 0, 2 * Math.PI);
+                        drawCtx.fill();
 
                     } else {
 
-                        ctx.strokeStyle = '#' + sceneSettings.paint.color.toString(16);
-                        ctx.lineWidth = radius * 2;
-                        ctx.lineTo(x, y);
-                        ctx.stroke();
+                        drawCtx.strokeStyle = '#' + sceneSettings.paint.color.toString(16);
+                        drawCtx.lineWidth = radius * 2;
+                        drawCtx.lineTo(x, y);
+                        drawCtx.stroke();
 
                     }
+
+                    ctx.drawImage(drawCanvas, 0, 0, width, height);
 
                 }
 
@@ -350,14 +389,21 @@ export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh
 
                 pending = true;
                 if (m.map.flipY) {
-                    image = await createImageBitmap(image, {imageOrientation: 'flipY'});
+                    image = await createImageBitmap(image, { imageOrientation: 'flipY' });
                 }
-                pending = false;
                 const cvs = getCanvas(width, height);
+                getDrawCanvas(width, height);
                 const ctx = cvs.getContext('2d');
                 ctx?.drawImage(image, 0, 0, width, height);
                 m.map.image = cvs;
+                pending = false;
 
+                if (lastMaterial && m !== lastMaterial) {
+
+                    restoreBitMapTexture();
+                    return;
+
+                }
             }
 
             lastMaterial = m;

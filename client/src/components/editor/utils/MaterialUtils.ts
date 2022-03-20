@@ -191,12 +191,12 @@ export const MaterialStaticUtils = {
 
         const mList = this.getAllMaterial(mesh);
         if (mList.length === 1) {
-            
+
             const m = mList[0];
-            
+
             if (!(m instanceof MeshStandardMaterial)) {
-                
-                mesh.material = new MeshStandardMaterial({color: m.color, map: m.map});
+
+                mesh.material = new MeshStandardMaterial({ color: m.color, map: m.map });
 
             }
         } else {
@@ -207,7 +207,7 @@ export const MaterialStaticUtils = {
 
                 if (!(m instanceof MeshStandardMaterial)) {
 
-                    (mesh.material as Material[])[i] = new MeshStandardMaterial({color: m.color, map: m.map});
+                    (mesh.material as Material[])[i] = new MeshStandardMaterial({ color: m.color, map: m.map });
 
                 }
 
@@ -215,6 +215,30 @@ export const MaterialStaticUtils = {
 
         }
 
+    },
+
+    async saveOriginTextureImage(m: MeshStandardMaterial | MeshBasicMaterial) {
+
+        if (m.map?.image) {
+
+            if (m.map.image instanceof ImageBitmap) {
+
+                (m as any).originTextureImage = m.map.image
+
+            } else if (m.map.image instanceof HTMLCanvasElement) {
+
+                (m as any).originTextureImage = await createImageBitmap(m.map.image);
+
+            }
+
+        }
+
+    },
+
+    getOriginTextureImage(m: MeshStandardMaterial | MeshBasicMaterial) {
+        
+        return (m as any).originTextureImage as ImageBitmap | undefined;
+    
     }
 }
 

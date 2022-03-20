@@ -2,7 +2,7 @@ import React, { ChangeEventHandler, FormEventHandler, useEffect, useRef, useStat
 import { useUpdate } from '../../../hooks/common';
 import { observe, sceneSettings, TextureType } from '../settings';
 import './Toolbox.scss';
-import { Switch, Radio, RadioChangeEvent, Select, Slider, Button, Table, Progress } from 'antd';
+import { Switch, Radio, RadioChangeEvent, Select, Slider, Button, Table, Progress, Popconfirm } from 'antd';
 import { getCanvas } from '../utils/canvas';
 import { sceneStorage } from '../store';
 import { loadFile } from '../utils/Files';
@@ -35,6 +35,14 @@ export default function Toolbox() {
     urls.sort();
 
     setTextures(urls);
+
+  }
+
+  function onBufferTypeChange() {
+
+    const current = sceneSettings.scene.logarithmicDepthBuffer;
+    sceneSettings.scene.logarithmicDepthBuffer = !current;
+    window.location.reload();
 
   }
 
@@ -188,7 +196,7 @@ export default function Toolbox() {
 
   function handleEditModeChange(mode: string) {
 
-    sceneSettings.currentTool = mode;
+    sceneSettings.edit.type = mode;
 
     setEditMode(mode);
 
@@ -582,6 +590,12 @@ export default function Toolbox() {
             : null
         }
         <div className='toolbox-folder'>
+          <span>Logarithmic ZBuffer</span>
+          <Popconfirm placement="topLeft" title={'please note that this will cause page reload'} onConfirm={() => onBufferTypeChange()} okText="Yes" cancelText="No">
+            <Switch checked={sceneSettings.scene.logarithmicDepthBuffer} size='small' />
+          </Popconfirm>
+        </div>
+        <div className='toolbox-folder'>
           <span>Enable Shadow</span><Switch defaultChecked={sceneSettings.scene.castShadow} size='small' onChange={checked => sceneSettings.scene.castShadow = checked} />
         </div>
         <div className='toolbox-folder'>
@@ -635,7 +649,7 @@ export default function Toolbox() {
       infoTable.data.length ?
         <div className='toolbox-infotable'>
           <Table
-
+            scroll={{ y: 600 }}
             columns={infoTable.columns}
             dataSource={infoTable.data}
             pagination={false}

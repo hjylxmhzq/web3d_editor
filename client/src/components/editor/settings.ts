@@ -109,7 +109,7 @@ export enum TextureType {
 const ignoreKey = ['text'];
 
 const sceneSettings = {
-    version: 1,
+    version: 2,
     currentTool: 'move',
     sculpt: {
         size: 0.2,
@@ -191,7 +191,8 @@ const sceneSettings = {
         baseMapBrightness: 0.5,
         showBaseMap: false,
         showSkybox: false,
-        cubeTextureName: 'sky_1',
+        cubeTextureName: 'beach',
+        logarithmicDepthBuffer: false,
     },
     text: {
         loading: -1,

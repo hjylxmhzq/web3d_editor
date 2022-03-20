@@ -11,7 +11,7 @@ import { Octree } from './utils/Octree';
 import { SimplifyModifier } from './utils/SimplifyModifier';
 import { SimplifyModifier as SimplifyModifierOrigin } from './utils/SimplifyModifierOrigin';
 import simplifyMesh from './utils/SimplifyModifierTexture';
-import { saveToLocal, TilesGenerator, initFileSystem } from './utils/gen3dtiles';
+import { saveToLocal, TilesGenerator, initFileSystem } from './utils/Gen3dtiles';
 import { MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree, SplitStrategy, SAH, CENTER, AVERAGE } from 'three-mesh-bvh';
 import { MeshBVHVisualizer } from './utils/MeshBVHVisializer';
 import { createMeshEdge, GeometryOperator, GeoStaticUtils, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
@@ -30,11 +30,14 @@ import { sceneStorage } from './store';
 import { SelectionBoxHelper } from './utils/SelectBoxHelper';
 import { rectCast } from './utils/rectCast';
 import { CSG } from 'three-csg-ts';
-import { exportGLTF } from './utils/exporter';
+import { exportGLTF } from './utils/Exporter';
 import { BaseMap, createBaseMapPlane } from './utils/BaseMap';
 import { parseGeoJson } from './utils/GeoJsonLoader';
 import { projectFromLonLat } from './utils/projections';
 import { loadCubeTexture } from './utils/CubeTexture';
+import { sceneHistory } from './utils/SceneHistory';
+import { fossilDelta } from './utils/fossil-delta';
+import { DebugTilesRenderer } from '3d-tiles-renderer';
 
 const renderEvent = new EventEmitter();
 
@@ -45,6 +48,8 @@ const _identityM4 = new Matrix4().identity();
 const selectedMeshRef: { current: undefined | Mesh } = { current: undefined };
 const selectedMeshSet: Set<Mesh> = new Set();
 const selectedTriSet: Set<number> = new Set();
+
+(window as any).selectedMeshRef = selectedMeshRef;
 
 const raycaster = new Raycaster();
 
@@ -236,20 +241,15 @@ export async function scene(si: SceneInfo) {
 
   observe(() => sceneSettings.scene.showBaseMap, () => {
     if (sceneSettings.scene.showBaseMap) {
-      baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, sceneSettings.scene.baseMapZoomLevel);
-      console.log('baseMap plane', baseMapPlane);
-      baseMapGroup.add(baseMapPlane);
+      baseMap.enable = true;
     } else {
-      baseMapGroup.clear();
+      baseMap.enable = false;
     }
   });
 
   observe(() => sceneSettings.scene.baseMapBrightness, () => {
-    if (sceneSettings.scene.showBaseMap && baseMapPlane) {
-      const brightness = sceneSettings.scene.baseMapBrightness;
-      const r = brightness * 0xff;
-      const hex = '#' + r.toString(16).substring(0, 2).repeat(3);
-      (baseMapPlane.material as MeshBasicMaterial).color = new Color(hex);
+    if (sceneSettings.scene.showBaseMap) {
+      baseMap.brightness = sceneSettings.scene.baseMapBrightness;
     }
   });
 
@@ -313,6 +313,7 @@ export async function scene(si: SceneInfo) {
         octree.add(obj);
       }
     });
+    sceneHistory.addInsertObject(model, group);
     group.add(model);
   });
 
@@ -337,6 +338,7 @@ export async function scene(si: SceneInfo) {
 
   observe(() => sceneSettings.action.deleteGeometry, async (o, n) => {
     if (selectedMeshRef.current) {
+      sceneHistory.addRemoveObject(selectedMeshRef.current, selectedMeshRef.current.parent || group);
       octree.remove(selectedMeshRef.current);
       selectedMeshRef.current.parent?.remove(selectedMeshRef.current);
       selectedMeshRef.current = undefined;
@@ -348,6 +350,7 @@ export async function scene(si: SceneInfo) {
     if (selectedMeshSet.size) {
       selectedMeshSet.forEach(mesh => {
         octree.remove(mesh);
+        sceneHistory.addRemoveObject(mesh, mesh.parent || group);
         mesh.parent?.remove(mesh);
         boxHelperGroup.clear();
         bvhHelperGroup.clear();
@@ -487,7 +490,7 @@ export async function scene(si: SceneInfo) {
   }, async (o, n) => {
     if (selectedMeshRef.current) {
       const materials = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
-      
+
       for (let i = 0; i < materials.length; i++) {
         const m = materials[i];
         const cvs = getCanvas(10, 10, false, true, 0xdddddd);
@@ -773,25 +776,31 @@ export async function scene(si: SceneInfo) {
   let baseMapGroup = new Group();
   let brushHelper = createBrushHelper();
   let paintBrushHelper = createPaintBrushMesh();
+  let baseMap = new BaseMap(
+    camera,
+    sceneSettings.scene.baseMapCenterLng,
+    sceneSettings.scene.baseMapCenterLat,
+    sceneSettings.scene.baseMapZoomLevel,
+    sceneSettings.scene.showBaseMap
+  );
   let trianglesHighlightHelper = new Group();
-  let baseMapPlane: Mesh;
+
+  baseMap.brightness = sceneSettings.scene.baseMapBrightness;
 
   if (sceneSettings.scene.showBaseMap) {
 
-    baseMapPlane = createBaseMapPlane(sceneSettings.scene.baseMapCenterLng, sceneSettings.scene.baseMapCenterLat, sceneSettings.scene.baseMapZoomLevel);
-    const brightness = sceneSettings.scene.baseMapBrightness;
-    const r = brightness * 0xff;
-    const hex = '#' + r.toString(16).substring(0, 2).repeat(3);
-    (baseMapPlane.material as MeshBasicMaterial).color = new Color(hex);
-    baseMapGroup.add(baseMapPlane);
+    baseMap.enable = true;
 
   }
-
+  
+  
   trianglesHighlightHelper.add(getTrianglesHighlightMesh());
   let boxHelperGroup = new Group();
   brushHelper.visible = false;
   paintBrushHelper.visible = false;
-
+  
+  const group = new Group();
+  
   scene.add(helperGroup);
   helperGroup.add(brushHelper);
   helperGroup.add(meshEdgeHelperGroup);
@@ -801,6 +810,7 @@ export async function scene(si: SceneInfo) {
   helperGroup.add(trianglesHighlightHelper);
   helperGroup.add(trianglesHighlightHelper);
   helperGroup.add(baseMapGroup);
+  helperGroup.add(baseMap);
 
   let octree = new Octree({
     undeferred: false,
@@ -814,6 +824,20 @@ export async function scene(si: SceneInfo) {
     overlapPct: 0,
     scene,
   });
+
+  function addObjectToScene(obj: Object3D) {
+
+    octree.add(obj);
+    sceneHistory.addObject(obj);
+
+  }
+
+  function removeObjectFromScene(obj: Object3D) {
+
+    octree.remove(obj);
+    obj.parent?.remove(obj);
+
+  }
 
   octree.helperGroup.visible = sceneSettings.global.showOctreeHelper;
 
@@ -1018,10 +1042,16 @@ export async function scene(si: SceneInfo) {
 
   let transforming = false;
 
+  let matrixStart = new Matrix4();
+  let matrixEnd = new Matrix4();
   transformControl.addEventListener('mouseDown', (e) => {
 
     flyOrbitControls.enabled = false;
     transforming = true;
+    if (selectedMeshRef.current) {
+      selectedMeshRef.current.updateMatrix();
+      matrixStart.copy(selectedMeshRef.current.matrix);
+    }
 
   });
 
@@ -1031,6 +1061,12 @@ export async function scene(si: SceneInfo) {
     transforming = false;
     updateMeshEdge();
     updateBoundingBox();
+    if (selectedMeshRef.current) {
+      selectedMeshRef.current.updateMatrix();
+      matrixEnd.copy(selectedMeshRef.current.matrix);
+      const transform = matrixEnd.multiply(matrixStart.invert());
+      sceneHistory.addTransform(selectedMeshRef.current, transform.clone());
+    }
 
   });
 
@@ -1516,7 +1552,9 @@ export async function scene(si: SceneInfo) {
 
           if (intersection.faceIndex && intersection.face) {
 
+            
             const go = new GeometryOperator(selectedMeshRef.current.geometry);
+            const positions = go.rebuild().getAttribute('position').array;
 
             if (sceneSettings.edit.type === 'addvertex') {
 
@@ -1541,6 +1579,13 @@ export async function scene(si: SceneInfo) {
             // const meshFace = new MeshFace(face.a, face.b, face.c, _temp);
 
             const newGeo = go.rebuild();
+
+            const newPositions = newGeo.getAttribute('position').array;
+
+            const diff = fossilDelta.create(positions, newPositions);
+
+            console.log('diff', diff);
+
             selectedMeshRef.current.geometry = newGeo;
             selectedMeshRef.current.geometry.boundsTree = new MeshBVH(newGeo, { strategy: CENTER });
 
@@ -1574,7 +1619,7 @@ export async function scene(si: SceneInfo) {
   // const sceneFile = '3dtiles/gltf_b3dm/rock.gltf';
   // const sceneFile = '3dtiles/gltf_b3dm/trunk.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/po1.glb';
-  // const sceneFile = '3dtiles/gltf_b3dm/mountain1.glb';
+  const sceneFile = '3dtiles/gltf_b3dm/mountain1.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/city.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/cottage2.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/model.gltf';
@@ -1582,59 +1627,31 @@ export async function scene(si: SceneInfo) {
   // const sceneFile = '3dtiles/gltf_b3dm/l23_402.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/lod17.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/lod17_1.glb';
-  const sceneFile = '3dtiles/gltf1/sample.gltf';
+  // const sceneFile = '3dtiles/gltf1/sample.gltf';
   // const sceneFile = '3dtiles/b3dm2gltf/BlockBA_L18_';
   // const sceneFile = '3dtiles/gltf_b3dm/plane_tree_trunk/scene.gltf';
   // const sceneFile = '3dtiles/test_data2/luogang.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/luogang_merged.glb';
   // const sceneFile = '3dtiles/gltf_b3dm/luogang_merged.gltf';
 
-  const model = await loadGltf(scene, 'http://127.0.0.1:8999/' + sceneFile);
+  // const model = await loadGltf(scene, 'http://127.0.0.1:8999/' + sceneFile);
 
-  const basicMaterial = new MeshStandardMaterial({ color: new Color('white'), wireframe: false, wireframeLinewidth: 1 });
+  const tilesRenderer = load3DTile(si, 'http://127.0.0.1:8999/3dtiles/3dtile_octree/tileset.json');
 
-  // model.position.set(0, 0, 0);
-  console.log(model);
+  renderEvent.on('render', () => {
+    camera.updateMatrix();
+    tilesRenderer.update();
+  });
 
-  const simplifyModifier = new SimplifyModifier();
-
-  const simplifyModifierOrigin = new SimplifyModifierOrigin();
-
-  // mergeMeshesInGroup(model, true);
-
-  // model.traverse(m => {
-  //   if (m instanceof Mesh) {
-  //     // m.material = basicMaterial;
-  //     // allGeo.push(m.geometry);
-  //     // octree.add(m);
-  //     modelMesh = m.clone(true);
-  //     modelMesh.applyMatrix4(m.parent?.matrixWorld);
-  //   }
-  // });
-
-
-  // modelMesh.material = basicMaterial;
-
-  // helperGroup.add(createMeshEdge(modelMesh, true, new Color('red')));
-
-  // modelMesh.geometry = subdivisionModifier.modify(simGeo);
-
-  // const simGeo = simplifyMesh(modelMesh.geometry, 0.1, false);
-  // const simGeo = simplifyModifier.modify(modelMesh.geometry, 1) as any;
-  // modelMesh.geometry = simGeo;
-
-
-  const group = new Group();
-
-  group.add(model);
+  group.add(tilesRenderer.group as Group);
 
   scene.add(group);
 
-  group.traverse(m => {
-    if (m instanceof Mesh) {
-      octree.add(m);
-    }
-  });
+  // model.traverse(m => {
+  //   if (m instanceof Mesh) {
+  //     addObjectToScene(m);
+  //   }
+  // });
 
   enableShadow(group);
   await sceneManager.init(sceneFile, group);
@@ -1720,4 +1737,26 @@ function loadGltf(scene: Scene, src: string): Promise<Group> {
       }
     );
   })
+}
+
+function load3DTile(threeScene: SceneInfo, resource: string) {
+  const { camera, scene, renderer } = threeScene;
+  const tilesRenderer = new DebugTilesRenderer(resource);
+  tilesRenderer.displayBoxBounds = true;
+  tilesRenderer.maxDepth = 2;
+  tilesRenderer.onLoadTileSet = () => {
+    // moveToTile(tilesRenderer);
+  }
+  tilesRenderer.onLoadModel = (scene, tile) => {
+    scene.traverse(m => {
+      if (m instanceof Mesh) {
+        m.receiveShadow = true;
+      }
+    })
+  }
+  tilesRenderer.stopAtEmptyTiles = false;
+  tilesRenderer.setCamera(camera);
+  tilesRenderer.setResolutionFromRenderer(camera, renderer);
+
+  return tilesRenderer;
 }

@@ -1,4 +1,4 @@
-import { CanvasTexture, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Plane, PlaneBufferGeometry, Raycaster, Texture, TextureLoader, Vector3 } from "three";
+import { CanvasTexture, Color, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Plane, PlaneBufferGeometry, Raycaster, Texture, TextureLoader, Vector3 } from "three";
 import { getCanvas } from "./canvas";
 
 export function updateBaseMapCenter(lng: number, lat: number) {
@@ -90,24 +90,72 @@ function bingMapUrlFactory(lng: number, lat: number, z: number) {
 
 export class BaseMap extends Object3D {
 
-    group = new Group();
+    mapPlane = new Mesh();
+    skylinePlane: Mesh;
     raycaster = new Raycaster();
     plane = new Plane(new Vector3(0, 1, 0));
-    constructor(public camera: PerspectiveCamera, public centerLon: number, public centerLat: number, public level: number) {
+    private _brightness = 1;
+    private _enable = false;
+    constructor(public camera: PerspectiveCamera, public centerLon: number, public centerLat: number, public level: number, enable: boolean) {
 
         super();
-        this.group.rotateX(-0.5 * Math.PI);
-        this.add(this.group);
+        this.enable = enable;
+
+        const skylinePlaneGeo = new PlaneBufferGeometry(100000, 100000, 1, 1);
+        this.skylinePlane = new Mesh(skylinePlaneGeo, new MeshBasicMaterial({ color: this.brightnessToColor(this.brightness) }));
+        this.skylinePlane.rotateX(-0.5 * Math.PI);
+        this.skylinePlane.renderOrder = -1;
+        // this.add(this.skylinePlane);
+
+    }
+
+    set brightness(v: number) {
+        this._brightness = v;
+        this.update();
+    }
+
+    get brightness() {
+        return this._brightness;
+    }
+
+    set enable(v: boolean) {
+        if (v !== this.enable) {
+            this.remove(this.mapPlane);
+            // this.remove(this.skylinePlane);
+            if (v) {
+                this.mapPlane = createBaseMapPlane(this.centerLon, this.centerLat, this.level);
+                // this.add(this.skylinePlane);
+                this.add(this.mapPlane);
+            }
+            this._enable = v;
+        }
+    }
+
+    get enable() {
+        return this._enable;
+    }
+
+    private brightnessToColor(brightness: number) {
+
+        const r = this.brightness * 0xff;
+        const hex = '#' + r.toString(16).substring(0, 2).repeat(3);
+        return hex;
 
     }
 
     update() {
 
-        this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
-        const intersect = new Vector3();
-        this.raycaster.ray.intersectPlane(this.plane, intersect);
-        console.log(intersect);
-        return true;
+        if (this.enable) {
+
+            this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
+            const intersect = new Vector3();
+            this.raycaster.ray.intersectPlane(this.plane, intersect);
+            console.log(intersect);
+            (this.mapPlane.material as MeshBasicMaterial).color = new Color(this.brightnessToColor(this.brightness));
+            (this.skylinePlane.material as MeshBasicMaterial).color = new Color(this.brightnessToColor(this.brightness));
+            return true;
+
+        }
 
     }
 
@@ -136,8 +184,6 @@ export function createBaseMapPlane(lng: number, lat: number, level: number) {
     const plane = new PlaneBufferGeometry(planeSize, planeSize, 1, 1);
 
     const planeMesh = new Mesh(plane, material);
-
-    planeMesh.rotateX(-0.5 * Math.PI);
 
     let x = Math.pow(2, z - 1) * (lng / 180 + 1);
 
@@ -216,6 +262,7 @@ export function createBaseMapPlane(lng: number, lat: number, level: number) {
 
     loadTiledMap();
 
+    planeMesh.rotateX(-0.5 * Math.PI);
 
     return planeMesh;
 

@@ -67,11 +67,13 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   const ratio = window.innerWidth / window.innerHeight;
   const orcamRadius = 100
   // const camera = new OrthographicCamera(-orcamRadius * ratio, orcamRadius * ratio, orcamRadius, -orcamRadius, 0, 1000000);
-  const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+  const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
 
   camera.position.set(50, 50, 50);
+
   const renderer = new WebGLRenderer({
     alpha: true,
+    logarithmicDepthBuffer: sceneSettings.scene.logarithmicDepthBuffer,
   });
   // renderer.setClearColor(0x000000, 0); // the default
   renderer.setClearColor(sceneSettings.scene.backgroundColor, 1);

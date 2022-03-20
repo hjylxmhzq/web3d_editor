@@ -122,9 +122,13 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
     let curCenter: Vector2 = new Vector2();
 
     let uvs: number[] = [];
-
+    let iii = 0;
     for (let coords of geoCoords) {
 
+      iii++
+      // if (iii !== 5) {
+      //   continue;
+      // }
 
       if (!inited) {
 
@@ -143,7 +147,7 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
       });
 
       let count = 0;
-      let start = idx;
+      let start = index.length;
 
       let sumEdgeLength = 0;
 
@@ -170,6 +174,8 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
           sumEdgeLength / uvRepeatX, height / uvRepeatY,
         );
 
+        let idx = positions.length / 3;
+
         positions.push(
           p1[0], 0, p1[1],
           p2[0], 0, p2[1],
@@ -183,7 +189,6 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
         )
 
         count += 6;
-        idx += 4;
 
       }
 
@@ -210,6 +215,8 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
 
       const v3x = data.vertices[c * 2];
       const v3y = data.vertices[c * 2 + 1];
+      
+      let idx = positions.length / 3;
 
       positions.push(
         v1x, height, v1y,
@@ -222,8 +229,6 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
         0, 0,
         0, 0,
       );
-
-      let idx = (positions.length / 3) - 3;
 
       index.push(idx, idx + 1, idx + 2);
 
