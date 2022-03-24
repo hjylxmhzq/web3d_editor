@@ -20,6 +20,10 @@ export async function initFileSystem() {
         multiple: true,
     });
 
+    const fileHandle = await dirHandle.getFileHandle('temp.json', { create: true });
+    await dirHandle.removeEntry('temp.json');
+    console.log(fileHandle);
+
 }
 
 interface LocalFile {
@@ -30,7 +34,8 @@ interface LocalFile {
 export async function saveToLocal(files: LocalFile[], onProgress?: (finished: number, total: number) => void) {
 
     if (!dirHandle) {
-        await initFileSystem();
+        console.error('initFileSystem should be called before save');
+        return;
     }
 
     console.log(dirHandle);
@@ -38,12 +43,11 @@ export async function saveToLocal(files: LocalFile[], onProgress?: (finished: nu
     let idx = 0;
 
     for (let file of files) {
-        console.time('write ' + file.name);
+        console.log('write ' + file.name);
         const fileHandle = await dirHandle.getFileHandle(file.name, { create: true });
         const ws = await fileHandle.createWritable();
         await ws.write(file.blob);
         await ws.close();
-        console.timeEnd('write ' + file.name);
         idx++;
         onProgress && onProgress(idx, files.length);
     }
@@ -132,7 +136,7 @@ export class TilesGenerator extends EventDispatcher {
 
         const uri = '';
 
-        const geometricError = ocNode.objects.length ? 0 : 2000;
+        const geometricError = ocNode.objects.length ? 0 : 0;
 
         const children: TileNode[] = [];
 
@@ -143,16 +147,24 @@ export class TilesGenerator extends EventDispatcher {
             refine: 'ADD'
         };
 
+        let maxRadiusX = radius;
+        let maxRadiusY = radius;
+        let maxRadiusZ = radius;
+
         if (ocNode.objects.length) {
             const group = new Group();
-            
+
+            group.name = 'OctreeNode'
+
             for (let obj of ocNode.objects) {
-                
+
                 this.finishedObjectCount++;
-                
+
                 const obj3d = obj.object;
 
-                const obj3dCloned = obj3d.clone();
+                const obj3dCloned = obj3d.clone() as Mesh;
+
+                obj3dCloned.uuid = obj3d.uuid;
 
                 // if (obj3d.parent) {
 
@@ -172,18 +184,47 @@ export class TilesGenerator extends EventDispatcher {
 
                 const matrixWorld = obj3d.matrixWorld as Matrix4;
 
-                if (!isIdentityMatrix(matrixWorld)) {
+                matrixWorld.decompose(obj3dCloned.position, obj3dCloned.quaternion, obj3dCloned.scale);
+                obj3dCloned.updateMatrixWorld();
 
-                    obj3dCloned.applyMatrix4(matrixWorld);
+                obj3dCloned.geometry.computeBoundingBox();
+                const box = obj3dCloned.geometry.boundingBox;
+                if (box) {
+                    box.applyMatrix4(matrixWorld);
+                    for (let v of [box.min, box.max]) {
+                        const { x, y, z } = v;
+                        if (Math.abs(x - center.x) > maxRadiusX) {
 
+                            maxRadiusX = Math.abs(x - center.x);
+
+                        }
+                        if (Math.abs(y - center.y) > maxRadiusY) {
+
+                            maxRadiusY = Math.abs(y - center.y);
+
+                        }
+                        if (Math.abs(z - center.z) > maxRadiusZ) {
+
+                            maxRadiusZ = Math.abs(z - center.z);
+
+                        }
+                    }
                 }
-
 
                 group.children.push(obj3dCloned);
 
                 this.dispatchEvent({ type: 'progress' });
             }
 
+            if (maxRadiusX !== radius) {
+                tileNode.boundingVolume.box[3] = maxRadiusX;
+            }
+            if (maxRadiusY !== radius) {
+                tileNode.boundingVolume.box[7] = maxRadiusY;
+            }
+            if (maxRadiusZ !== radius) {
+                tileNode.boundingVolume.box[11] = maxRadiusZ;
+            }
             const filename = ocNodeId + '.b3dm';
 
             const b3dm = await this.genB3dm(group);

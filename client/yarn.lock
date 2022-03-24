@@ -2652,12 +2652,6 @@
   "resolved" "https://registry.npmjs.org/@xtuc/long/-/long-4.2.2.tgz"
   "version" "4.2.2"
 
-"3d-tiles-renderer@file:../../3DTilesRendererJS":
-  "resolved" "file:../../3DTilesRendererJS"
-  "version" "0.3.3"
-  dependencies:
-    "path-browserify" "^1.0.1"
-
 "abab@^2.0.3", "abab@^2.0.5":
   "integrity" "sha512-9IK9EadsbHo6jLWIpxpR6pL0sazTXV6+SQv25ZB+F7Bj9mJNaOc4nCRabwd5M/JwmUa8idz6Eci6eKfJryPs6Q=="
   "resolved" "https://registry.npmjs.org/abab/-/abab-2.0.5.tgz"

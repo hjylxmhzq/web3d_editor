@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3Base from 'd3';
 import * as d3Dag from 'd3-dag';
 import { GraphNode, sceneManager } from '../api/scene';
+import { observe, sceneSettings } from '../editor/settings';
+import { getAllVersions, Versions } from '../api/vertionControl';
 
 const d3 = Object.assign({}, d3Base, d3Dag);
 
@@ -10,27 +12,63 @@ interface IProps {
 
 export default function Toolbar({ }: IProps) {
   const ref = useRef<SVGSVGElement>(null);
-  const [graph, setGraph] = useState(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    sceneManager.addListener('graphChange', (graph) => {
-      setGraph(graph);
-    })
+
+    async function updateVersion() {
+
+      if (sceneSettings.action.selectScene === 'None') {
+        setVisible(false);
+        return;
+      }
+
+      setVisible(true);
+      const versions = await getAllVersions(sceneSettings.action.selectScene);
+
+      if (ref.current) {
+        ref.current.innerHTML = '';
+        const data = versionsToDagData(versions);
+        if (data.length) {
+          drawDag(ref.current, data);
+        }
+      }
+
+    }
+
+    let onWheel = (e: WheelEvent) => {
+
+      containerRef.current && (containerRef.current.scrollLeft += e.deltaY);
+
+    };
+
+    if (containerRef.current) {
+
+      const container = containerRef.current;
+      container.addEventListener('wheel', onWheel);
+
+    }
+
+    updateVersion();
+
+    observe(() => sceneSettings.action.selectScene, async () => {
+      await updateVersion();
+    });
+
+    observe(() => sceneSettings.action.updateVersions, async () => {
+      await updateVersion();
+    });
+
+    return () => {
+      (ref.current) && (ref.current.innerHTML = '');
+      (containerRef.current) && containerRef.current.removeEventListener('wheel', onWheel);
+    }
   }, []);
 
-  useEffect(() => {
-    if (ref.current && graph) {
-      ref.current.innerHTML = '';
-      const data = dfsSearch(graph);
-      drawDag(ref.current, data);
-      return () => {
-        (ref.current) && (ref.current.innerHTML = '');
-      }
-    }
-  }, [graph]);
-
-  return <div style={{ height: '100vh', width: '150px', overflow: 'hidden', marginLeft: 'auto' }}>
-    <svg ref={ref}></svg>
+  return <div ref={containerRef} style={{ transition: 'height 0.2s', height: visible ? 150 : 0, width: '100%', overflowX: 'auto' }}>
+    <svg style={{ height: 140 }} ref={ref}></svg>
+    <div style={{ position: 'absolute', right: 2, writingMode: 'vertical-lr', top: 0, bottom: 0, textAlign: 'center' }}>Versions</div>
   </div>
 }
 
@@ -41,52 +79,46 @@ interface DAGNode {
   parentIds: string[];
 }
 
-function dfsSearch(root: GraphNode) {
+function versionsToDagData(versions: Versions): DAGNode[] {
 
-  const branchCount: Record<string, number> = {};
-  function rename(n: GraphNode) {
-    if (!branchCount[n.branch]) {
-      branchCount[n.branch] = 1;
-    } else {
-      branchCount[n.branch] += 1;
-    }
-    n.name = n.branch + `[${branchCount[n.branch]}]`;
-    for (let child of n.next) {
-      rename(child);
-    }
-  }
-  rename(root);
+  const nodeName = versions.nodes.map(n => n.tagName);
+  const nodeTable: Record<string, DAGNode> = {};
 
-  const nodes = new Map<string, DAGNode>();
-  function helper(n: GraphNode, parent: GraphNode | null) {
-    if (parent) {
-      if (nodes.has(n.name)) {
-        nodes.get(n.name)?.parentIds.push(parent.name);
-      } else {
-        nodes.set(n.name, {
-          originId: n.id,
-          id: n.name,
-          parentIds: [parent.name],
-          text: n.type
-        });
-      }
+  const dagNodes: DAGNode[] = [{
+    id: '',
+    originId: '',
+    text: 'root',
+    parentIds: [],
+  }];
+
+  for (let link of versions.links) {
+
+    if (!nodeTable[nodeName[link.to]]) {
+
+      nodeTable[nodeName[link.to]] = {
+        id: nodeName[link.to],
+        originId: nodeName[link.to],
+        text: nodeName[link.to],
+        parentIds: [nodeName[link.from]],
+      };
+
     } else {
-      nodes.set(n.name, {
-        originId: n.id,
-        id: n.name,
-        parentIds: [],
-        text: n.type,
-      });
+
+      nodeTable[nodeName[link.to]].parentIds.push(nodeName[link.from]);
+
     }
-    for (let child of n.next) {
-      helper(child, n);
-    }
+
   }
-  helper(root, null);
-  const result = Array.from(nodes).map(v => v[1]);
-  return result;
+
+  for (let node of Object.values(nodeTable)) {
+
+    dagNodes.push(node);
+
+  }
+
+  return dagNodes;
+
 }
-
 
 async function drawDag(svgNode: SVGSVGElement, data: DAGNode[]) {
   // const resp = await fetch(
@@ -94,8 +126,8 @@ async function drawDag(svgNode: SVGSVGElement, data: DAGNode[]) {
   // );
   // const data = await resp.json();
   console.log(data);
-  const nodeRadius = 20;
-  const edgeRadius = 10;
+  const nodeRadius = 30;
+  const edgeRadius = 20;
 
   const baseLayout = d3
     .zherebko()
@@ -103,18 +135,18 @@ async function drawDag(svgNode: SVGSVGElement, data: DAGNode[]) {
       nodeRadius * 2,
       (nodeRadius + edgeRadius) * 2,
       edgeRadius * 2
-    ])
+    ]);
   const dag = d3.dagStratify()(data);
   const layout = (dag: any) => {
     const { width, height } = baseLayout(dag);
-    // for (const node of dag) {
-    //   [node.x, node.y] = [node.y, node.x];
-    // }
-    // for (const { points } of dag.ilinks()) {
-    //   for (const point of points) {
-    //     [point.x, point.y] = [point.y, point.x];
-    //   }
-    // }
+    for (const node of dag) {
+      [node.x, node.y] = [node.y, node.x];
+    }
+    for (const { points } of dag.ilinks()) {
+      for (const point of points) {
+        [point.x, point.y] = [point.y, point.x];
+      }
+    }
     return { width: height, height: width };
   };
   // Get laidout dag
@@ -144,7 +176,7 @@ async function drawDag(svgNode: SVGSVGElement, data: DAGNode[]) {
     .y((d: any) => d.y);
 
   // Plot edges
-  svgSelection.attr("viewBox", [0, 0, 150, 600].join(" "));
+  svgSelection.attr("viewBox", [0, 0, 2500, height > 100 ? height : 100].join(" "));
   svgSelection
     .append("g")
     .selectAll("path")
@@ -186,22 +218,36 @@ async function drawDag(svgNode: SVGSVGElement, data: DAGNode[]) {
     .append("g")
     .on('click', (e, d) => {
       const id = d.data.originId;
-      sceneManager.forwardToNode(id);
+      // sceneManager.forwardToNode(id);
+      sceneSettings.scene.currentTileVersion = id;
+      rect.attr("fill", (node) => {
+        return node.data.id === id ?
+          '#eaa'
+          : '#999';
+      });
     })
     .attr("transform", ({ x, y }) => `translate(${x}, ${y})`);
 
   // Plot node circles
-  nodes
-  .append('rect')
-  .attr('x', -30)
-  .attr('y', -10)
-  .attr('rx', 5)
-  .attr('ry', 5)
-  .attr('width', 60)
-  .attr('height', 20)
-  .attr("fill", (n) => colorMap[n.data.id]);
-    // .append("circle")
-    // .attr("r", nodeRadius)
+  let rect = nodes
+    .append('rect')
+    .attr('x', -40)
+    .attr('y', -10)
+    .attr('rx', 5)
+    .attr('ry', 5)
+    .attr('width', 80)
+    .attr('height', 20)
+    .attr('stroke', "yellow")
+    .attr('filter', 'drop-shadow( 1px 1px 1px rgba(0, 0, 0, .3))')
+    .attr('stroke-width', 1)
+    .attr('style', 'transition: all 0.1s; cursor: pointer;')
+    .attr("fill", (node) => {
+      return node.data.id === sceneSettings.scene.currentTileVersion ?
+        '#eaa'
+        : '#999';
+    });
+  // .append("circle")
+  // .attr("r", nodeRadius)
 
   // Add text to nodes
   nodes
@@ -212,5 +258,6 @@ async function drawDag(svgNode: SVGSVGElement, data: DAGNode[]) {
     .attr("font-family", "sans-serif")
     .attr("text-anchor", "middle")
     .attr("alignment-baseline", "middle")
-    .attr("fill", "white");
+    .attr("fill", "white")
+    .attr('style', 'cursor: pointer;');
 }

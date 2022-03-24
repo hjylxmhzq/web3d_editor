@@ -1,0 +1,22 @@
+.toolbar-container {
+    position: absolute;
+    text-align: left;
+    padding: 0 25px 0 10px;
+    left: 5px;
+    right: 205px;
+    bottom: 30px;
+    border-radius: 15px;
+    overflow: hidden;
+    background-color: #ddd;
+    box-shadow: 3px 3px 7px 1px #11111136;
+    transition: all 0.2s;
+    transform: translateX(calc(-100% + 20px));
+}
+
+.toolbar-container:hover {
+    transform: translateX(0px);
+}
+
+.toolbar-container:focus-within {
+    transform: translateX(0px);
+}

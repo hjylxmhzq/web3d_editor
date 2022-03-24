@@ -1,0 +1,12 @@
+{
+    "restartable": "rs",
+    "verbose": true,
+    "watch": [
+        "dist/"
+    ],
+    "ignore": [
+        "uploads",
+        "resources"
+    ],
+    "delay": "500"
+}

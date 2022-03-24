@@ -93,7 +93,7 @@ function load3DTile(threeScene: SceneInfo, resource: string) {
     // moveToTile(tilesRenderer);
   }
   tilesRenderer.onLoadModel = (scene, tile) => {
-    scene.traverse(m => {
+    scene.traverse((m: any) => {
       if (m instanceof Mesh) {
         m.receiveShadow = true;
       }
@@ -102,7 +102,7 @@ function load3DTile(threeScene: SceneInfo, resource: string) {
   tilesRenderer.stopAtEmptyTiles = false;
   tilesRenderer.setCamera(camera);
   tilesRenderer.setResolutionFromRenderer(camera, renderer);
-  threeScene.scene.add(tilesRenderer.group);
+  threeScene.scene.add(tilesRenderer.group as any);
   GlobalVar.set('tilesRenderer', tilesRenderer);
 
   function onRender() {

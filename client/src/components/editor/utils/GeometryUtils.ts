@@ -1,4 +1,4 @@
-import { BufferGeometry, ClampToEdgeWrapping, Color, Float32BufferAttribute, Group, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Quaternion, RepeatWrapping, Vector2, Vector3, Wrapping } from "three";
+import { BufferGeometry, ClampToEdgeWrapping, Color, CylinderBufferGeometry, DoubleSide, Float32BufferAttribute, Group, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Quaternion, RepeatWrapping, SphereBufferGeometry, Vector2, Vector3, Wrapping } from "three";
 import { mergeBufferGeometries } from "three/examples/jsm/utils/BufferGeometryUtils";
 import { generateUUID } from "three/src/math/MathUtils";
 import simplifyMesh from "./SimplifyModifierTexture";
@@ -10,6 +10,8 @@ let _v0 = new Vector3();
 let _v1 = new Vector3();
 let _v2 = new Vector3();
 let _v3 = new Vector3();
+
+const yAxis = new Vector3(0, 1, 0);
 
 export function mergeMesh(model: Object3D) {
     model.traverse(m => {
@@ -502,6 +504,240 @@ class Triangle {
 
 }
 
+export function getBoundaryVerticesOfXZ(mesh: Mesh) {
+
+    const positionAttr = mesh.geometry.getAttribute('position');
+
+    const hashXZ: Record<string, number[]> = {};
+
+    const boundary: number[][] = [];
+
+    for (let vIdx = 0; vIdx < positionAttr.count; vIdx++) {
+
+        const x = positionAttr.getX(vIdx);
+        const y = positionAttr.getY(vIdx);
+        const z = positionAttr.getZ(vIdx);
+
+        const hash = x.toFixed(4) + '_' + z.toFixed(4);
+
+        if (hashXZ[hash]) {
+            if (hashXZ[hash].length === 1) {
+                boundary.push(hashXZ[hash]);
+            }
+            hashXZ[hash].push(vIdx);
+        } else {
+            hashXZ[hash] = [vIdx];
+        }
+
+    }
+
+    return boundary;
+
+}
+
+export function getAllEdgeVertices(mesh: Mesh) {
+
+    const indexArr = getIndexArray(mesh);
+
+    const positionAttr = mesh.geometry.getAttribute('position');
+
+    const hashStartEnd: Record<string, number[]> = {};
+
+    const boundary: number[][] = [];
+
+    const vHash: Record<string, number[]> = {};
+
+    for (let i = 0; i < positionAttr.count; i++) {
+
+        _v1.fromBufferAttribute(positionAttr, i);
+        const hash = `${_v1.x}_${_v1.y}_${_v1.z}`;
+        if (vHash[hash]) {
+            vHash[hash].push(i);
+        } else {
+            vHash[hash] = [i];
+        }
+
+    }
+
+    for (let i = 0; i < indexArr.length; i += 3) {
+
+        for (let j = 0; j < 3; j++) {
+
+            const j1 = (j + 1) % 3;
+
+            const start = indexArr[i + j];
+            const end = indexArr[i + j1];
+
+            let v1 = new Vector3().fromBufferAttribute(positionAttr, start);
+            let v2 = new Vector3().fromBufferAttribute(positionAttr, end);
+
+            [v1, v2] = [v1, v2].sort((a, b) => {
+                if (a.x !== a.x) {
+                    return a.x - b.x;
+                } else if (a.y !== b.y) {
+                    return a.y - b.y;
+                } else if (a.z !== b.z) {
+                    return a.z - b.z;
+                }
+                return 0;
+            });
+
+            const hash1 = `${v1.x}_${v1.y}_${v1.z}`;
+            const hash2 = `${v2.x}_${v2.y}_${v2.z}`;
+
+            boundary.push([...vHash[hash1], ...vHash[hash2]]);
+
+        }
+
+    }
+
+    return boundary;
+
+}
+
+export function getAllVertices(mesh: Mesh) {
+
+    const indexArr = getIndexArray(mesh);
+
+    const positionAttr = mesh.geometry.getAttribute('position');
+
+    const hashStartEnd: Record<string, number[]> = {};
+
+    const boundary: number[][] = [];
+
+    const vHash: Record<string, number[]> = {};
+
+    for (let i = 0; i < positionAttr.count; i++) {
+
+        _v1.fromBufferAttribute(positionAttr, i);
+        const hash = `${_v1.x}_${_v1.y}_${_v1.z}`;
+        if (vHash[hash]) {
+            vHash[hash].push(i);
+        } else {
+            vHash[hash] = [i];
+            boundary.push(vHash[hash]);
+        }
+
+    }
+
+    return boundary;
+
+}
+
+export function createBoundaryCylinder(mesh: Mesh, mode: 'edge' | 'vertical_edge' | 'vertex') {
+
+    const material = new MeshStandardMaterial({ color: new Color('red'), transparent: true, opacity: 0.5 });
+
+    let boundaries
+
+    if (mode === 'vertical_edge') {
+        boundaries = getBoundaryVerticesOfXZ(mesh);
+    } else if (mode === 'edge') {
+        boundaries = getAllEdgeVertices(mesh);
+    } else {
+        boundaries = getAllVertices(mesh);
+    }
+
+    const positionAttr = mesh.geometry.getAttribute('position');
+
+    const group = new Group();
+
+    mesh.updateMatrixWorld();
+    mesh.matrixWorld.decompose(group.position, group.quaternion, group.scale);
+    group.updateMatrixWorld();
+
+
+    if (mode === 'vertical_edge') {
+        for (let boundary of boundaries) {
+
+            boundary.sort((i1, i2) => {
+
+                const y1 = positionAttr.getY(i1);
+                const y2 = positionAttr.getY(i2);
+                return y1 - y2;
+
+            });
+
+            const start = boundary[boundary.length - 1];
+            const end = boundary[0];
+
+            const v1 = new Vector3().fromBufferAttribute(positionAttr, start);
+            const v2 = new Vector3().fromBufferAttribute(positionAttr, end);
+
+            const cylinder = new CylinderBufferGeometry(0.5, 0.5, Math.abs(v1.y - v2.y + 0.1), 10, 1);
+            const center = v2.add(v1.sub(v2).multiplyScalar(0.5));
+            const newMesh = new Mesh(cylinder, material);
+            newMesh.translateX(center.x);
+            newMesh.translateY(center.y);
+            newMesh.translateZ(center.z);
+            newMesh.userData = {
+                attachMesh: mesh,
+                vertices: boundary,
+            }
+            group.add(newMesh);
+        }
+    } else if (mode === 'edge') {
+        for (let boundary of boundaries) {
+
+            boundary.sort((i1, i2) => {
+
+                const a = new Vector3().fromBufferAttribute(positionAttr, i1);
+                const b = new Vector3().fromBufferAttribute(positionAttr, i2);
+
+                if (a.x !== a.x) {
+                    return a.x - b.x;
+                } else if (a.y !== b.y) {
+                    return a.y - b.y;
+                } else if (a.z !== b.z) {
+                    return a.z - b.z;
+                }
+                return 0;
+            });
+
+            const start = boundary[boundary.length - 1];
+            const end = boundary[0];
+
+            _v1.fromBufferAttribute(positionAttr, start);
+            _v2 = new Vector3().fromBufferAttribute(positionAttr, end);
+
+            const cylinder = new CylinderBufferGeometry(0.5, 0.5, Math.abs(_v1.distanceTo(_v2) + 0.1), 10, 1);
+            const center = _v2.clone().add(_v1.clone().sub(_v2).multiplyScalar(0.5));
+            const newMesh = new Mesh(cylinder, material);
+            newMesh.translateX(center.x);
+            newMesh.translateY(center.y);
+            newMesh.translateZ(center.z);
+            newMesh.quaternion.setFromUnitVectors(yAxis, _v2.sub(_v1).normalize());
+            newMesh.updateMatrixWorld();
+            newMesh.userData = {
+                attachMesh: mesh,
+                vertices: boundary,
+            }
+            group.add(newMesh);
+        }
+    } else if (mode === 'vertex') {
+        for (let boundary of boundaries) {
+
+            const start = boundary[boundary.length - 1];
+
+            const v1 = new Vector3().fromBufferAttribute(positionAttr, start);
+
+            const cylinder = new SphereBufferGeometry(0.5, 10, 10);
+            const newMesh = new Mesh(cylinder, material);
+            newMesh.translateX(v1.x);
+            newMesh.translateY(v1.y);
+            newMesh.translateZ(v1.z);
+            newMesh.userData = {
+                attachMesh: mesh,
+                vertices: boundary,
+            }
+            group.add(newMesh);
+        }
+    }
+
+    return group;
+}
+
+
 export class GeometryOperator {
 
     faces: Triangle[] = [];
@@ -837,45 +1073,45 @@ export class GeometryOperator {
 
                 const face = this.faces[i];
                 const { v1, v2, v3 } = face;
-    
+
                 const vc1 = GeoStaticUtils.vertexToVector3(v1);
                 const vc2 = GeoStaticUtils.vertexToVector3(v2);
                 const vc3 = GeoStaticUtils.vertexToVector3(v3);
-    
+
                 const mid12 = new Vector3().addVectors(vc1, vc2).multiplyScalar(0.5);
                 const mid23 = new Vector3().addVectors(vc2, vc3).multiplyScalar(0.5);
                 const mid31 = new Vector3().addVectors(vc3, vc1).multiplyScalar(0.5);
-    
+
                 const vl = [];
-        
+
                 for (let nv of [mid12, mid23, mid31]) {
-    
+
                     const newVertex = new Vertex(nv.x, nv.y, nv.z);
                     this.vertices.push(newVertex);
-    
+
                     vl.push(newVertex);
-    
+
                     if (this.hasUV) {
-    
+
                         newVertex.uv = face.getUV(nv);
-    
+
                     }
-    
+
                 }
 
                 const face1 = new Triangle(v1, vl[0], vl[2]);
                 const face2 = new Triangle(v2, vl[1], vl[0]);
                 const face3 = new Triangle(v3, vl[2], vl[1]);
                 const face4 = new Triangle(vl[0], vl[1], vl[2]);
-    
+
                 for (let f of [face1, face2, face3, face4]) {
-    
+
                     f.materialIndex = face.materialIndex;
                     this.addFace(f);
                     newFaces.push(f);
 
                 }
-        
+
             }
 
             for (let faceIndex of faceIndices) {
@@ -910,48 +1146,48 @@ export class GeometryOperator {
 
                 const face = this.faces[i];
                 const { v1, v2, v3 } = face;
-    
+
                 const vc1 = GeoStaticUtils.vertexToVector3(v1);
                 const vc2 = GeoStaticUtils.vertexToVector3(v2);
                 const vc3 = GeoStaticUtils.vertexToVector3(v3);
-    
+
                 const mid12 = new Vector3().addVectors(vc1, vc2).multiplyScalar(0.5);
                 const mid23 = new Vector3().addVectors(vc2, vc3).multiplyScalar(0.5);
                 const mid31 = new Vector3().addVectors(vc3, vc1).multiplyScalar(0.5);
-    
+
                 const vl = [];
-    
+
                 let faceId = 0;
-    
+
                 for (let nv of [mid12, mid23, mid31]) {
-    
+
                     const newVertex = new Vertex(nv.x, nv.y, nv.z);
                     newVertices.push(newVertex);
-    
+
                     vl.push(newVertex);
-    
+
                     if (this.hasUV) {
-    
+
                         newVertex.uv = face.getUV(nv);
-    
+
                     }
-    
+
                 }
-    
+
                 const face1 = new Triangle(v1, vl[0], vl[2]);
                 const face2 = new Triangle(v2, vl[1], vl[0]);
                 const face3 = new Triangle(v3, vl[2], vl[1]);
                 const face4 = new Triangle(vl[0], vl[1], vl[2]);
-    
+
                 for (let f of [face1, face2, face3, face4]) {
-    
+
                     f.id = faceId++;
                     f.materialIndex = face.materialIndex;
-    
+
                 }
-    
+
                 newFaces.push(face1, face2, face3, face4);
-    
+
             }
 
             this.faces = newFaces;
@@ -1425,22 +1661,37 @@ export const GeoStaticUtils = {
 
     },
 
-    applyMatrix4ToVertices(geo: BufferGeometry, m: Matrix4) {
+    applyMatrix4ToVertices(geo: BufferGeometry, m: Matrix4, indices?: number[]) {
 
         const positionAttr = geo.getAttribute('position');
 
         const v = new Vector3();
 
-        for (let i = 0; i < positionAttr.count; i++) {
+        if (indices) {
 
-            v.fromBufferAttribute(positionAttr, i);
-            v.applyMatrix4(m);
+            for (let i of indices) {
 
-            positionAttr.setXYZ(i, v.x, v.y, v.z);
+                v.fromBufferAttribute(positionAttr, i);
+                v.applyMatrix4(m);
+                positionAttr.setXYZ(i, v.x, v.y, v.z);
+
+            }
+
+        } else {
+
+            for (let i = 0; i < positionAttr.count; i++) {
+
+                v.fromBufferAttribute(positionAttr, i);
+                v.applyMatrix4(m);
+
+                positionAttr.setXYZ(i, v.x, v.y, v.z);
+
+            }
 
         }
-
+        positionAttr.needsUpdate = true;
         geo.setAttribute('position', positionAttr);
+        geo.computeVertexNormals();
 
     },
 
@@ -1460,7 +1711,9 @@ export const GeoStaticUtils = {
             }
             this.applyMatrix4ToVertices(geo, mesh.matrixWorld);
             geos.push(geo);
-            materials.push(MaterialStaticUtils.getFirstMaterial(mesh) || new MeshStandardMaterial());
+            const m = MaterialStaticUtils.getFirstMaterial(mesh) || new MeshStandardMaterial();
+            m.side = DoubleSide;
+            materials.push(m);
         });
 
         for (let geo of geos) {

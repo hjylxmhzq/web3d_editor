@@ -116,6 +116,9 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
     let uvRepeatX = 100;
     // let uvRepeatY = floorHeight * 3;
     let uvRepeatY = 100;
+    let repeatCount = height / uvRepeatY >> 0;
+    repeatCount = repeatCount === 0 ? 1 : repeatCount;
+    uvRepeatY = height / repeatCount;
 
     let inited = false;
     let offset: Vector2 = new Vector2();
@@ -201,6 +204,33 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
 
     let count = 0;
 
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (let i = 0; i < data.vertices.length; i += 2) {
+
+      const x = data.vertices[i];
+      const y = data.vertices[i + 1];
+
+      if (x < minX) {
+        minX = x;
+      } else if (x > maxX) {
+        maxX = x;
+      }
+
+      if (y < minY) {
+        minY = y;
+      } else if (y > maxY) {
+        maxY = y;
+      }
+
+    }
+
+    let xLen = maxX - minX;
+    let yLen = maxY - minY;
+
     for (let i = 0; i < triangles.length; i += 3) {
 
       const a = triangles[i];
@@ -215,7 +245,7 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
 
       const v3x = data.vertices[c * 2];
       const v3y = data.vertices[c * 2 + 1];
-      
+
       let idx = positions.length / 3;
 
       positions.push(
@@ -225,9 +255,9 @@ function buildBuildingFeature(feature: any, floorHeight = 1, center = new Vector
       );
 
       uvs.push(
-        0, 0,
-        0, 0,
-        0, 0,
+        (v1x - minX) / xLen, (v1y - minY) / yLen,
+        (v2x - minX) / xLen, (v2y - minY) / yLen,
+        (v3x - minX) / xLen, (v3y - minY) / yLen,
       );
 
       index.push(idx, idx + 1, idx + 2);

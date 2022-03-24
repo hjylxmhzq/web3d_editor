@@ -82,8 +82,8 @@ export function insertToArray<T>(arr: T[], insertList: InsertItem<T>[]) {
 export function debounce(fn: (...args: any[]) => void, delay = 500) {
 
     let timer: number;
-    
-    return function(...args: any[]) {
+
+    return function (...args: any[]) {
 
         clearTimeout(timer);
 
@@ -96,4 +96,12 @@ export function debounce(fn: (...args: any[]) => void, delay = 500) {
     }
 
 
+}
+
+export function nextTick() {
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => {
+            resolve(undefined);
+        });
+    })
 }

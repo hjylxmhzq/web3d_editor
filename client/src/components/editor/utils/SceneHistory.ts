@@ -8,6 +8,7 @@ export class SceneHistory {
     current: HistoryItem = new EmptyHistoryItem();
     head = this.current;
     objectMap = new Map<string, Object3D>();
+    objectSet = new Set<Object3D>();
     attributeMap = new Map<string, Object3D>();
 
     constructor() {
@@ -35,23 +36,16 @@ export class SceneHistory {
 
     }
 
+    getAllChangedObjects() {
+
+        return this.objectSet;
+
+    }
+
     addObject(obj: Object3D) {
 
-        if (this.objectMap.has(obj.uuid)) {
-
-            console.error('object has already added');
-            return;
-
-        }
-
-        if (!obj.uuid) {
-
-            obj.uuid = generateUUID();
-
-        }
-
         obj.updateMatrix();
-        this.objectMap.set(obj.uuid, obj);
+        this.objectSet.add(obj);
 
     }
 
@@ -69,6 +63,7 @@ export class SceneHistory {
 
     addTransform(obj: Object3D, transform: Matrix4) {
 
+        this.addObject(obj);
         const item = new TransformChange(transform, obj);
         this.addHisotryItem(item);
 
@@ -76,11 +71,7 @@ export class SceneHistory {
 
     addInsertObject(obj: Object3D, parent: Object3D) {
 
-        if (!this.objectMap.has(obj.uuid)) {
-
-            this.objectMap.set(obj.uuid, obj);
-
-        }
+        this.addObject(obj);
 
         const item = new InsertChange(obj, parent);
         this.addHisotryItem(item);
@@ -89,20 +80,17 @@ export class SceneHistory {
 
     addRemoveObject(obj: Object3D, parent: Object3D) {
 
-        if (!this.objectMap.has(obj.uuid)) {
-
-            this.objectMap.set(obj.uuid, obj);
-
-        }
+        this.addObject(obj);
 
         const item = new RemoveChange(obj, parent);
         this.addHisotryItem(item);
 
     }
 
-    addTextureChange(material: MeshBasicMaterial | MeshStandardMaterial, beforemImage: ImageData, image: ImageData) {
+    addTextureChange(obj: Mesh, material: MeshBasicMaterial | MeshStandardMaterial, beforemImage: ImageData, image: ImageData) {
 
-        const item = new TextureChange(material, beforemImage, image, TextureType.albedo);
+        this.addObject(obj);
+        const item = new TextureChange(obj, material, beforemImage, image, TextureType.albedo);
         this.addHisotryItem(item);
 
     }
@@ -190,12 +178,14 @@ class TransformChange extends HistoryItem {
     applyBackward(): void {
 
         this.object.applyMatrix4(this.invertTransform);
+        this.object.updateMatrixWorld();
 
     }
 
     applyForward(): void {
 
         this.object.applyMatrix4(this.transform);
+        this.object.updateMatrixWorld();
 
     }
 
@@ -229,7 +219,7 @@ class TextureChange extends HistoryItem {
     public leftTop = [0, 0];
     public rightBottom = [0, 0];
 
-    constructor(public material: MeshStandardMaterial | MeshBasicMaterial, beforeImage: ImageData, image: ImageData, public textureType: TextureType) {
+    constructor(public object: Mesh, public material: MeshStandardMaterial | MeshBasicMaterial, beforeImage: ImageData, image: ImageData, public textureType: TextureType) {
 
         super(OperationType.texture);
         this.diff = this.createDiff(beforeImage, image);

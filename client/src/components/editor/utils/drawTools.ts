@@ -142,6 +142,7 @@ export function performPaint(bvh: MeshBVH, point: Vector3, targetMesh: Mesh, bru
 
 let pending = false;
 let lastMaterial: MeshStandardMaterial | MeshBasicMaterial | null = null;
+let lastMesh: Mesh | null = null;
 let begin = true;
 
 export function getLastMaterial() {
@@ -177,7 +178,7 @@ async function restoreBitMapTexture() {
 
 function updateTextureHistory() {
     
-    if (lastMaterial && lastMaterial.map && isCanvas(lastMaterial.map.image)) {
+    if (lastMesh && lastMaterial && lastMaterial.map && isCanvas(lastMaterial.map.image)) {
 
         const { width, height } = lastMaterial.map.image;
 
@@ -188,7 +189,7 @@ function updateTextureHistory() {
         const beforeImageData = ctx.getImageData(0, 0, width, height);
         const curImageData = curCtx.getImageData(0, 0, width, height);
 
-        sceneHistory.addTextureChange(lastMaterial, beforeImageData, curImageData);
+        sceneHistory.addTextureChange(lastMesh, lastMaterial, beforeImageData, curImageData);
     
     }
 
@@ -236,6 +237,7 @@ export async function performPaintOnPoint(point: Vector3, face: Face, targetMesh
 
     if (m !== lastMaterial) {
 
+        lastMesh = targetMesh;
         if (m.map?.image) {
 
             beforeImage.width = m.map.image.width;

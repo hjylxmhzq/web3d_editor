@@ -10,6 +10,7 @@ export interface TextureInfo {
 class SceneStorage {
     storage = new Map();
     cbList: ((key: string, value: any) => void)[] = [];
+    cached: Record<string, any> = {};
 
     constructor() {
 
@@ -55,7 +56,7 @@ class SceneStorage {
         this.setStorage('textures', t);
 
     }
-    saveTextures(textures: {name: string, texture: TextureInfo}[]) {
+    saveTextures(textures: { name: string, texture: TextureInfo }[]) {
 
         const tx = this.getStorage('textures', {});
 
@@ -88,16 +89,20 @@ class SceneStorage {
 
     getTextureImage(name: string): Promise<HTMLImageElement> | null {
 
+        if (this.cached['texture-' + name]) {
+            return this.cached['texture-' + name];
+        }
+
         const t = this.getTexture(name);
 
         if (t) {
 
             const img = new Image();
             return new Promise((resolve, reject) => {
-                img.onload = function () {
+                img.onload = () => {
 
                     resolve(img);
-
+                    this.cached['texture-' + name] = img;
                 }
                 img.src = URL.createObjectURL(t.image);
             });

@@ -8,6 +8,7 @@ import Toolbox from './components/Toolbox';
 import { scene } from './scene';
 import { observe, sceneSettings } from './settings';
 import { loadCubeTexture } from './utils/CubeTexture';
+import './index.scss';
 
 
 export default function GenComponnet() {
@@ -26,9 +27,11 @@ export default function GenComponnet() {
 
   }, []);
 
-
   return <div>
-    <div style={{ position: 'absolute', width: '150px', left: 0 }}>
+    <div
+      className='toolbar-container'
+      tabIndex={3}
+    >
       <Toolbar />
     </div>
     <div style={{ position: 'absolute', width: '200px', right: 0, height: '100%', overflowY: 'auto' }}>
@@ -42,7 +45,8 @@ export default function GenComponnet() {
       bottom: 0,
       textAlign: 'left',
       padding: '0 10px',
-      backgroundColor: '#eee'
+      backgroundColor: '#eee',
+      overflow: 'hidden'
     }}>
       <span>
         {
@@ -50,7 +54,7 @@ export default function GenComponnet() {
         }
       </span>
     </div>
-    <div id="scene" ref={ref} style={{ width: '100vw', height: '100vh' }}></div>
+    <div id="scene" ref={ref} style={{ width: '100%', height: '100vh' }}></div>
   </div>
 }
 
@@ -58,6 +62,7 @@ export interface SceneInfo {
   scene: Scene,
   camera: PerspectiveCamera,
   renderer: WebGLRenderer,
+  secondRenderer?: WebGLRenderer
 }
 
 function setupThreeJs(el: HTMLDivElement): SceneInfo {
@@ -75,6 +80,9 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
     alpha: true,
     logarithmicDepthBuffer: sceneSettings.scene.logarithmicDepthBuffer,
   });
+
+  let secondRenderer: WebGLRenderer
+
   // renderer.setClearColor(0x000000, 0); // the default
   renderer.setClearColor(sceneSettings.scene.backgroundColor, 1);
   renderer.shadowMap.enabled = true;
@@ -86,11 +94,32 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   // renderer.setClearColor(0x151c1f);
   renderer.domElement.tabIndex = 1;
   el.appendChild(renderer.domElement);
-  let threeScene = {
+
+  let threeScene: SceneInfo = {
     scene,
     camera,
     renderer,
   };
+
+  if (sceneSettings.scene.secondCamera) {
+    secondRenderer = new WebGLRenderer({
+      alpha: true,
+      logarithmicDepthBuffer: sceneSettings.scene.logarithmicDepthBuffer,
+    });
+    secondRenderer.setClearColor(sceneSettings.scene.backgroundColor, 1);
+    secondRenderer.shadowMap.enabled = true;
+    secondRenderer.shadowMap.type = PCFSoftShadowMap;
+    secondRenderer.shadowMap.autoUpdate = true;
+    secondRenderer.outputEncoding = sRGBEncoding;
+    secondRenderer.setSize(400, 300);
+    secondRenderer.setPixelRatio(window.devicePixelRatio);
+    secondRenderer.domElement.style.position = 'absolute';
+    secondRenderer.domElement.style.top = '0px';
+    secondRenderer.domElement.style.left = '0px';
+    el.appendChild(secondRenderer.domElement);
+    threeScene.secondRenderer = secondRenderer;
+  }
+
 
   function loadBackground() {
 

@@ -1,7 +1,7 @@
 import { SceneInfo } from './index';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
-import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide, ConeBufferGeometry, RepeatWrapping } from 'three';
+import { Box3, Scene, Vector3, Vector2, Raycaster, Group, Object3D, Intersection, Mesh, Material, MeshBasicMaterial, Color, Matrix4, BufferGeometry, MeshStandardMaterial, BoxHelper, Box3Helper, FrontSide, SphereBufferGeometry, Texture, BoxBufferGeometry, PlaneBufferGeometry, DoubleSide, ConeBufferGeometry, RepeatWrapping, Sphere, Quaternion, OrthographicCamera } from 'three';
 import EventEmitter from 'events';
 import { CustomTransformControls } from '../Scene/CustomTransformControls';
 import { FlyOrbitControls } from '../Scene/FlyOrbitControls';
@@ -14,8 +14,8 @@ import simplifyMesh from './utils/SimplifyModifierTexture';
 import { saveToLocal, TilesGenerator, initFileSystem } from './utils/Gen3dtiles';
 import { MeshBVH, acceleratedRaycast, computeBoundsTree, disposeBoundsTree, SplitStrategy, SAH, CENTER, AVERAGE } from 'three-mesh-bvh';
 import { MeshBVHVisualizer } from './utils/MeshBVHVisializer';
-import { createMeshEdge, GeometryOperator, GeoStaticUtils, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
-import { debounce, normalizeMousePosition } from './utils/common';
+import { createBoundaryCylinder, createMeshEdge, GeometryOperator, GeoStaticUtils, mergeMeshesInGroup, refitMeshEdge } from './utils/GeometryUtils';
+import { debounce, nextTick, normalizeMousePosition } from './utils/common';
 import { SubdivisionModifier } from './utils/SubdivisionModifier';
 import { createBrushHelper, performStroke, StrokeParameter } from './utils/sculptTools';
 import customKeyboardEvent from './utils/inputEvent';
@@ -37,7 +37,10 @@ import { projectFromLonLat } from './utils/projections';
 import { loadCubeTexture } from './utils/CubeTexture';
 import { sceneHistory } from './utils/SceneHistory';
 import { fossilDelta } from './utils/fossil-delta';
-import { DebugTilesRenderer } from '3d-tiles-renderer';
+import { DebugTilesRenderer, TilesRenderer } from '3d-tiles-renderer';
+import { update3DTiles } from './utils/Update3DTiles';
+import { load3DTile } from './utils/TilesLoader';
+import { getAllVersions } from '../api/vertionControl';
 
 const renderEvent = new EventEmitter();
 
@@ -46,6 +49,7 @@ const _m0 = new Matrix4();
 const _identityM4 = new Matrix4().identity();
 
 const selectedMeshRef: { current: undefined | Mesh } = { current: undefined };
+let selectedMaterialIndex = 0;
 const selectedMeshSet: Set<Mesh> = new Set();
 const selectedTriSet: Set<number> = new Set();
 
@@ -54,7 +58,7 @@ const selectedTriSet: Set<number> = new Set();
 const raycaster = new Raycaster();
 
 export async function scene(si: SceneInfo) {
-  const { camera, scene, renderer } = si;
+  const { camera, scene, renderer, secondRenderer } = si;
 
 
   observe(() => sceneSettings.currentTool, (o, n) => {
@@ -210,6 +214,61 @@ export async function scene(si: SceneInfo) {
     }
   });
 
+  let enableSceneVersionChange = true;
+
+  observe(() => {
+    let _1 = sceneSettings.action.selectScene;
+  }, async (o, n) => {
+    if (n !== 'None') {
+      enableSceneVersionChange = false;
+      const versions = await getAllVersions(sceneSettings.action.selectScene);
+      let version = sceneSettings.scene.currentTileVersion;
+      if (!versions.nodes.find(v => v.tagName === version)) {
+        const newVersion = versions.nodes[versions.nodes.length - 1];
+        sceneSettings.scene.currentTileVersion = newVersion.tagName;
+      }
+      version = sceneSettings.scene.currentTileVersion;
+      enableSceneVersionChange = true;
+      tilesGroup.clear();
+      tilesRenderer = load3DTile(
+        si,
+        `http://127.0.0.1:8999/3dtiles_scene/${sceneSettings.action.selectScene}/tileset${version ? '_' + version : ''}.json`
+      );
+      tilesGroup.add(tilesRenderer.group as any);
+    } else {
+      tilesGroup.clear();
+      tilesRenderer = null;
+    }
+  });
+
+  observe(() => {
+    let _2 = sceneSettings.scene.currentTileVersion;
+  }, async () => {
+
+    if (sceneSettings.action.selectScene !== 'None' && enableSceneVersionChange) {
+
+      const version = sceneSettings.scene.currentTileVersion;
+      tilesGroup.clear();
+      tilesRenderer = load3DTile(
+        si,
+        `http://127.0.0.1:8999/3dtiles_scene/${sceneSettings.action.selectScene}/tileset${version ? '_' + version : ''}.json`
+      );
+      tilesGroup.add(tilesRenderer.group as any);
+    }
+
+  });
+
+  observe(() => sceneSettings.action.commitVersion, async (o, n) => {
+    if (o !== n && tilesRenderer && sceneSettings.action.selectScene !== 'None') {
+      const versionTag = Date.now().toString(16).substring(5);
+      const success = await update3DTiles(sceneSettings.action.selectScene, tilesRenderer, versionTag);
+      if (success) {
+        sceneSettings.scene.currentTileVersion = versionTag;
+        sceneSettings.action.updateVersions += 1;
+      }
+    }
+  });
+
   observe(() => sceneSettings.action.extractFaces, (o, n) => {
     if (o !== n) {
       if (selectedMeshRef.current && selectedTriSet.size) {
@@ -290,7 +349,6 @@ export async function scene(si: SceneInfo) {
 
     tilesGenerator.addEventListener('progress', () => {
       sceneSettings.text.loading = tilesGenerator.finishedObjectCount / tilesGenerator.objectCount;
-      console.log(sceneSettings.text.loading)
     });
     sceneSettings.text.loadingText = 'Generating 3D Tiles';
     await initFileSystem();
@@ -437,9 +495,17 @@ export async function scene(si: SceneInfo) {
   observe(() => {
     let { roughness, metalness } = sceneSettings.paint
   }, async (o, n) => {
+    let meshes: Mesh[] = [];
     if (selectedMeshRef.current) {
+      meshes = [selectedMeshRef.current];
+    }
+    if (selectedMeshSet.size) {
+      meshes = Array.from(selectedMeshSet);
+    }
+
+    for (let mesh of meshes) {
       let { roughness, metalness } = sceneSettings.paint
-      const material = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
+      const material = MaterialStaticUtils.getAllMaterial(mesh);
       for (let m of material) {
         if (m instanceof MeshStandardMaterial) {
           m.metalness = metalness;
@@ -464,17 +530,43 @@ export async function scene(si: SceneInfo) {
   });
 
   observe(() => {
-    let _ = sceneSettings.action.applyEnvMap
+    let _ = sceneSettings.action.editBoundary
   }, async (o, n) => {
     if (selectedMeshRef.current) {
-      const mList = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
-      for (let m of mList) {
-        if (m instanceof MeshStandardMaterial) {
-          m.envMap = loadCubeTexture(sceneSettings.scene.cubeTextureName);
-          m.envMapIntensity = 0.5;
+      updateBoundaryEditHanlder(selectedMeshRef.current);
+    }
+  });
+
+  observe(() => {
+    let _ = sceneSettings.action.applyEnvMap
+  }, async (o, n) => {
+    let meshes: Mesh[] = [];
+    if (selectedMeshRef.current) {
+      meshes = [selectedMeshRef.current];
+    }
+    if (selectedMeshSet.size) {
+      meshes = Array.from(selectedMeshSet);
+    }
+    let idx = 0;
+    sceneSettings.text.loading = 0;
+    sceneSettings.text.loadingText = 'applying EnvMap';
+    if (meshes?.length) {
+      for (let mesh of meshes) {
+        const mList = MaterialStaticUtils.getAllMaterial(mesh);
+        for (let m of mList) {
+          if (m instanceof MeshStandardMaterial) {
+            m.envMap = loadCubeTexture(sceneSettings.scene.cubeTextureName);
+            m.envMapIntensity = 0.5;
+          }
         }
+        idx++;
+        sceneSettings.text.loading = idx / meshes.length;
+        await nextTick();
       }
     }
+    setTimeout(() => {
+      sceneSettings.text.loading = -1;
+    }, 1000);
   });
 
   observe(() => {
@@ -514,214 +606,231 @@ export async function scene(si: SceneInfo) {
   });
 
   observe(() => sceneSettings.action.applyTexture, async (o, n) => {
-    if (!selectedMeshRef.current) {
 
+    let meshes: Mesh[] = [];
+
+    if (selectedMeshRef.current) {
+      meshes = [selectedMeshRef.current];
+    }
+
+    if (selectedMeshSet.size) {
+      meshes = Array.from(selectedMeshSet);
+    }
+
+    if (!meshes.length) {
       return;
-
     }
 
-    let material = MaterialStaticUtils.getFirstMaterial(selectedMeshRef.current);
-    const textureImg = await sceneStorage.getTextureImage(sceneSettings.action.applyTexture);
-    const texture = sceneStorage.getTexture(sceneSettings.action.applyTexture);
+    sceneSettings.text.loading = 0;
+    sceneSettings.text.loadingText = 'applying Textures...';
+    let idx = 0;
+    for (let mesh of meshes) {
 
-    if (!material) {
+      sceneHistory.addObject(mesh);
+      let material = MaterialStaticUtils.getFirstMaterial(mesh);
+      const textureImg = await sceneStorage.getTextureImage(sceneSettings.action.applyTexture);
+      const texture = sceneStorage.getTexture(sceneSettings.action.applyTexture);
 
-      material = selectedMeshRef.current.material = new MeshStandardMaterial();
+      if (!material) {
 
-    }
+        material = mesh.material = new MeshStandardMaterial();
 
-    if (!material.map) {
+      }
 
-      const m = MaterialStaticUtils.getFirstMaterial(selectedMeshRef.current);
-      material.map = new Texture(undefined, undefined, RepeatWrapping, RepeatWrapping);
-      material.needsUpdate = true;
+      if (!material.map) {
 
-    }
+        const m = MaterialStaticUtils.getFirstMaterial(mesh);
+        material.map = new Texture(undefined, undefined, RepeatWrapping, RepeatWrapping);
+        material.needsUpdate = true;
 
-    if (texture && textureImg) {
+      }
 
-      const { naturalWidth: w, naturalHeight: h } = textureImg;
+      if (texture && textureImg) {
 
-      const cvs = getCanvas(w, h);
-      const ctx = cvs.getContext('2d');
+        const { naturalWidth: w, naturalHeight: h } = textureImg;
 
-      if (ctx) {
+        const cvs = getCanvas(w, h);
+        const ctx = cvs.getContext('2d');
 
-        ctx.drawImage(textureImg, 0, 0, w, h);
+        if (ctx) {
 
-        const imgBitMap = await createImageBitmap(cvs);
+          ctx.drawImage(textureImg, 0, 0, w, h);
 
-        let mList = MaterialStaticUtils.getAllMaterial(selectedMeshRef.current);
+          const imgBitMap = await createImageBitmap(cvs);
+
+          let mList = MaterialStaticUtils.getAllMaterial(mesh);
 
 
-        if (selectedTriSet.size) {
+          if (selectedTriSet.size) {
 
-          const go = new GeometryOperator(selectedMeshRef.current.geometry);
-          const originMaterialIndex = go.extractFacesToGroup(Array.from(selectedTriSet));
-          selectedMeshRef.current.geometry = go.rebuild();
-          if (!Array.isArray(selectedMeshRef.current.material)) {
-            selectedMeshRef.current.material = [selectedMeshRef.current.material as MeshStandardMaterial];
-          }
-          const m = (selectedMeshRef.current.material as MeshStandardMaterial[])[originMaterialIndex];
-          const newMaterial = m.clone();
-          m.map && (newMaterial.map = m.map?.clone());
-          selectedMeshRef.current.material.push(newMaterial);
-          mList = [newMaterial];
-
-        }
-
-        if (texture.type === 'albedo') {
-
-          for (let m of mList) {
-
-            const t = m.map;
-
-            if (t) {
-              t.image = imgBitMap;
-              t.needsUpdate = true;
+            const go = new GeometryOperator(mesh.geometry);
+            const originMaterialIndex = go.extractFacesToGroup(Array.from(selectedTriSet));
+            mesh.geometry = go.rebuild();
+            if (!Array.isArray(mesh.material)) {
+              mesh.material = [mesh.material as MeshStandardMaterial];
             }
+            const m = (mesh.material as MeshStandardMaterial[])[originMaterialIndex];
+            const newMaterial = m.clone();
+            m.map && (newMaterial.map = m.map?.clone());
+            mesh.material.push(newMaterial);
+            mList = [newMaterial];
 
           }
 
-        } else if (texture.type === 'normal') {
+          if (texture.type === 'albedo') {
 
-          for (let m of mList) {
+            for (let m of mList) {
 
-            if (m instanceof MeshStandardMaterial) {
+              const t = m.map;
 
-              const normalMap = m.map?.clone() || new Texture();
-
-              normalMap.image = imgBitMap;
-
-              normalMap.needsUpdate = true;
-
-              m.normalMap = normalMap;
-
-              m.needsUpdate = true;
+              if (t) {
+                t.image = imgBitMap;
+                t.needsUpdate = true;
+              }
 
             }
 
-          }
+          } else if (texture.type === 'normal') {
 
-        } else if (texture.type === 'displace') {
+            for (let m of mList) {
 
-          for (let m of mList) {
+              if (m instanceof MeshStandardMaterial) {
 
-            if (m instanceof MeshStandardMaterial) {
+                const normalMap = m.map?.clone() || new Texture();
 
-              const displaceMap = m.map?.clone() || new Texture();
+                normalMap.image = imgBitMap;
 
-              displaceMap.image = imgBitMap;
+                normalMap.needsUpdate = true;
 
-              displaceMap.needsUpdate = true;
+                m.normalMap = normalMap;
 
-              m.displacementMap = displaceMap;
+                m.needsUpdate = true;
 
-              m.needsUpdate = true;
-
-            }
-
-          }
-
-        } else if (texture.type === TextureType.roughness) {
-
-          for (let m of mList) {
-
-            if (m instanceof MeshStandardMaterial) {
-
-              const roughnessMap = m.map?.clone() || new Texture();
-
-              roughnessMap.image = imgBitMap;
-
-              roughnessMap.needsUpdate = true;
-
-              m.roughnessMap = roughnessMap;
-
-              m.needsUpdate = true;
+              }
 
             }
 
-          }
+          } else if (texture.type === 'displace') {
 
-        } else if (texture.type === TextureType.ao) {
+            for (let m of mList) {
 
-          for (let m of mList) {
+              if (m instanceof MeshStandardMaterial) {
 
-            if (m instanceof MeshStandardMaterial) {
+                const displaceMap = m.map?.clone() || new Texture();
 
-              const aoMap = m.map?.clone() || new Texture();
+                displaceMap.image = imgBitMap;
 
-              aoMap.image = imgBitMap;
+                displaceMap.needsUpdate = true;
 
-              aoMap.needsUpdate = true;
+                m.displacementMap = displaceMap;
 
-              m.aoMap = aoMap;
+                m.needsUpdate = true;
 
-              m.needsUpdate = true;
-
-            }
-
-          }
-
-        } else if (texture.type === TextureType.metalness) {
-
-          for (let m of mList) {
-
-            if (m instanceof MeshStandardMaterial) {
-
-              const metalnessMap = m.map?.clone() || new Texture();
-
-              metalnessMap.image = imgBitMap;
-
-              metalnessMap.needsUpdate = true;
-
-              m.metalnessMap = metalnessMap;
-
-              m.needsUpdate = true;
+              }
 
             }
 
-          }
+          } else if (texture.type === TextureType.roughness) {
 
-        } else if (texture.type === TextureType.emissive) {
+            for (let m of mList) {
 
-          for (let m of mList) {
+              if (m instanceof MeshStandardMaterial) {
 
-            if (m instanceof MeshStandardMaterial) {
+                const roughnessMap = m.map?.clone() || new Texture();
 
-              const emissiveMap = m.map?.clone() || new Texture();
+                roughnessMap.image = imgBitMap;
 
-              emissiveMap.image = imgBitMap;
+                roughnessMap.needsUpdate = true;
 
-              emissiveMap.needsUpdate = true;
+                m.roughnessMap = roughnessMap;
 
-              m.emissiveMap = emissiveMap;
+                m.needsUpdate = true;
 
-              m.emissive = new Color(0xffffff);
-
-              m.needsUpdate = true;
+              }
 
             }
 
-          }
+          } else if (texture.type === TextureType.ao) {
 
-        } else if (texture.type === TextureType.alpha) {
+            for (let m of mList) {
 
-          for (let m of mList) {
+              if (m instanceof MeshStandardMaterial) {
 
-            if (m instanceof MeshStandardMaterial) {
+                const aoMap = m.map?.clone() || new Texture();
 
-              const alphaMap = m.map?.clone() || new Texture();
+                aoMap.image = imgBitMap;
 
-              alphaMap.image = imgBitMap;
+                aoMap.needsUpdate = true;
 
-              alphaMap.needsUpdate = true;
+                m.aoMap = aoMap;
 
-              m.alphaMap = alphaMap;
+                m.needsUpdate = true;
 
-              m.transparent = true;
+              }
 
-              m.needsUpdate = true;
+            }
+
+          } else if (texture.type === TextureType.metalness) {
+
+            for (let m of mList) {
+
+              if (m instanceof MeshStandardMaterial) {
+
+                const metalnessMap = m.map?.clone() || new Texture();
+
+                metalnessMap.image = imgBitMap;
+
+                metalnessMap.needsUpdate = true;
+
+                m.metalnessMap = metalnessMap;
+
+                m.needsUpdate = true;
+
+              }
+
+            }
+
+          } else if (texture.type === TextureType.emissive) {
+
+            for (let m of mList) {
+
+              if (m instanceof MeshStandardMaterial) {
+
+                const emissiveMap = m.map?.clone() || new Texture();
+
+                emissiveMap.image = imgBitMap;
+
+                emissiveMap.needsUpdate = true;
+
+                m.emissiveMap = emissiveMap;
+
+                m.emissive = new Color(0xffffff);
+
+                m.needsUpdate = true;
+
+              }
+
+            }
+
+          } else if (texture.type === TextureType.alpha) {
+
+            for (let m of mList) {
+
+              if (m instanceof MeshStandardMaterial) {
+
+                const alphaMap = m.map?.clone() || new Texture();
+
+                alphaMap.image = imgBitMap;
+
+                alphaMap.needsUpdate = true;
+
+                m.alphaMap = alphaMap;
+
+                m.transparent = true;
+
+                m.needsUpdate = true;
+
+              }
 
             }
 
@@ -731,7 +840,16 @@ export async function scene(si: SceneInfo) {
 
       }
 
+      idx++
+      sceneSettings.text.loading = idx / meshes.length;
+      await nextTick();
+
     }
+
+    setTimeout(() => {
+      sceneSettings.text.loading = -1;
+    }, 1000);
+
   });
 
   observe(() => {
@@ -774,6 +892,7 @@ export async function scene(si: SceneInfo) {
   let meshEdgeHelperGroup = new Group();
   let bvhHelperGroup = new Group();
   let baseMapGroup = new Group();
+  let verticesEditHelper = new Group();
   let brushHelper = createBrushHelper();
   let paintBrushHelper = createPaintBrushMesh();
   let baseMap = new BaseMap(
@@ -792,15 +911,16 @@ export async function scene(si: SceneInfo) {
     baseMap.enable = true;
 
   }
-  
-  
+
+
   trianglesHighlightHelper.add(getTrianglesHighlightMesh());
   let boxHelperGroup = new Group();
   brushHelper.visible = false;
   paintBrushHelper.visible = false;
-  
+
   const group = new Group();
-  
+  group.add(verticesEditHelper);
+
   scene.add(helperGroup);
   helperGroup.add(brushHelper);
   helperGroup.add(meshEdgeHelperGroup);
@@ -817,7 +937,7 @@ export async function scene(si: SceneInfo) {
     // set the max depth of tree
     depthMax: 10,
     // max number of objects before nodes split or merge
-    objectsThreshold: 8,
+    objectsThreshold: 50,
     // percent between 0 and 1 that nodes will overlap each other
     // helps insert objects that lie over more than one node
     radius: 10,
@@ -845,9 +965,14 @@ export async function scene(si: SceneInfo) {
 
   const selectBoxHelper = SelectionBoxHelper.getinstance(renderer.domElement, 'selection-box-helper');
 
+  const orCamera = new OrthographicCamera(-3000, 3000, 3000, -3000, 1, 6000);
+  orCamera.position.set(0, 1000, 0);
+  orCamera.lookAt(0, 0, 0);
+
   function renderLoop() {
     requestAnimationFrame(renderLoop);
     renderer.render(scene, camera);
+    secondRenderer?.render(scene, orCamera);
     flyOrbitControls.update();
     octree.update();
     camera.updateMatrixWorld();
@@ -913,6 +1038,13 @@ export async function scene(si: SceneInfo) {
       group.add(newMesh);
     }
 
+  }
+
+  function updateBoundaryEditHanlder(handlerMesh?: Mesh) {
+    verticesEditHelper.clear();
+    if (handlerMesh) {
+      verticesEditHelper.add(createBoundaryCylinder(handlerMesh, sceneSettings.edit.verticesEditMode as any));
+    }
   }
 
   function updateMeshEdge() {
@@ -1062,10 +1194,16 @@ export async function scene(si: SceneInfo) {
     updateMeshEdge();
     updateBoundingBox();
     if (selectedMeshRef.current) {
-      selectedMeshRef.current.updateMatrix();
-      matrixEnd.copy(selectedMeshRef.current.matrix);
+      const mesh = selectedMeshRef.current;
+      mesh.updateMatrix();
+      matrixEnd.copy(mesh.matrix);
       const transform = matrixEnd.multiply(matrixStart.invert());
-      sceneHistory.addTransform(selectedMeshRef.current, transform.clone());
+
+      if (mesh.userData.attachMesh && mesh.userData.vertices) {
+        GeoStaticUtils.applyMatrix4ToVertices(mesh.userData.attachMesh.geometry, transform, mesh.userData.vertices);
+      } else {
+        sceneHistory.addTransform(mesh, transform.clone());
+      }
     }
 
   });
@@ -1438,11 +1576,17 @@ export async function scene(si: SceneInfo) {
 
         }
 
+        selectedMaterialIndex = 0;
+
         selectedMeshRef.current = firstCast;
 
         selectedMeshRef.current.updateMatrixWorld();
 
         updateTransformInfo();
+
+        if (!firstCast.userData.attachMesh) {
+          updateBoundaryEditHanlder();
+        }
 
         const texture = MaterialStaticUtils.getTexture(selectedMeshRef.current);
 
@@ -1507,6 +1651,7 @@ export async function scene(si: SceneInfo) {
       }
 
     } else {
+      updateBoundaryEditHanlder()
 
       if (selectedMeshRef.current?.geometry.boundsTree) {
 
@@ -1548,11 +1693,17 @@ export async function scene(si: SceneInfo) {
 
         const intersection = hit[0];
 
+        if (intersection.face) {
+
+          selectedMaterialIndex = intersection.face.materialIndex;
+
+        }
+
         if (sceneSettings.currentTool === 'edit') {
 
           if (intersection.faceIndex && intersection.face) {
 
-            
+
             const go = new GeometryOperator(selectedMeshRef.current.geometry);
             const positions = go.rebuild().getAttribute('position').array;
 
@@ -1636,14 +1787,39 @@ export async function scene(si: SceneInfo) {
 
   // const model = await loadGltf(scene, 'http://127.0.0.1:8999/' + sceneFile);
 
-  const tilesRenderer = load3DTile(si, 'http://127.0.0.1:8999/3dtiles/3dtile_octree/tileset.json');
+  let tilesRenderer: TilesRenderer | null = null;
+
+  let tilesGroup = new Group();
+
+  (async () => {
+    if (sceneSettings.action.selectScene !== 'None') {
+      enableSceneVersionChange = false;
+      const versions = await getAllVersions(sceneSettings.action.selectScene);
+      let version = sceneSettings.scene.currentTileVersion;
+      if (!versions.nodes.find(v => v.tagName === version)) {
+        const newVersion = versions.nodes[versions.nodes.length - 1];
+        sceneSettings.scene.currentTileVersion = newVersion.tagName;
+      }
+      version = sceneSettings.scene.currentTileVersion;
+      enableSceneVersionChange = true;
+      tilesGroup.clear();
+      tilesRenderer = load3DTile(
+        si,
+        `http://127.0.0.1:8999/3dtiles_scene/${sceneSettings.action.selectScene}/tileset${version ? '_' + version : ''}.json`
+      );
+      tilesGroup.add(tilesRenderer.group as any);
+    } else {
+      tilesGroup.clear();
+      tilesRenderer = null;
+    }
+  })();
 
   renderEvent.on('render', () => {
     camera.updateMatrix();
-    tilesRenderer.update();
+    tilesRenderer && tilesRenderer.update();
   });
 
-  group.add(tilesRenderer.group as Group);
+  group.add(tilesGroup);
 
   scene.add(group);
 
@@ -1737,26 +1913,4 @@ function loadGltf(scene: Scene, src: string): Promise<Group> {
       }
     );
   })
-}
-
-function load3DTile(threeScene: SceneInfo, resource: string) {
-  const { camera, scene, renderer } = threeScene;
-  const tilesRenderer = new DebugTilesRenderer(resource);
-  tilesRenderer.displayBoxBounds = true;
-  tilesRenderer.maxDepth = 2;
-  tilesRenderer.onLoadTileSet = () => {
-    // moveToTile(tilesRenderer);
-  }
-  tilesRenderer.onLoadModel = (scene, tile) => {
-    scene.traverse(m => {
-      if (m instanceof Mesh) {
-        m.receiveShadow = true;
-      }
-    })
-  }
-  tilesRenderer.stopAtEmptyTiles = false;
-  tilesRenderer.setCamera(camera);
-  tilesRenderer.setResolutionFromRenderer(camera, renderer);
-
-  return tilesRenderer;
 }

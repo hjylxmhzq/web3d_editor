@@ -109,7 +109,7 @@ export enum TextureType {
 const ignoreKey = ['text'];
 
 const sceneSettings = {
-    version: 2,
+    version: 3,
     currentTool: 'move',
     sculpt: {
         size: 0.2,
@@ -130,6 +130,7 @@ const sceneSettings = {
     edit: {
         type: 'sculpt',
         simpleSubdivision: false,
+        verticesEditMode: 'edge',
     },
     transform: {
         x: 0,
@@ -171,8 +172,13 @@ const sceneSettings = {
         clearAllTexture: 1,
         applyEnvMap: 1,
         convertToPBRMaterial: 1,
+        commitVersion: 1,
+        selectScene: '',
+        updateVersions: 1,
+        editBoundary: 1,
     },
     scene: {
+        secondCamera: true,
         castShadow: true,
         shadowMapResolution: 2048,
         showAxisHelper: false,
@@ -193,6 +199,7 @@ const sceneSettings = {
         showSkybox: false,
         cubeTextureName: 'beach',
         logarithmicDepthBuffer: false,
+        currentTileVersion: '',
     },
     text: {
         loading: -1,

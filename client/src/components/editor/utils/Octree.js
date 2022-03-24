@@ -986,7 +986,7 @@ export class OctreeNode {
             radiusObj = 0;
         }
 
-        // radiusObj = 0; // ignore size
+        radiusObj = 0; // ignore size
         // find delta and distance
         deltaX = positionObj.x - position.x;
         deltaY = positionObj.y - position.y;

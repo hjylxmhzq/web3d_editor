@@ -7,6 +7,7 @@ import { getCanvas } from '../utils/canvas';
 import { sceneStorage } from '../store';
 import { loadFile } from '../utils/Files';
 import { loadOnlineTexture } from '../../api/io';
+import { getAllScene } from '../../api/vertionControl';
 
 const { Option } = Select;
 
@@ -18,6 +19,7 @@ export default function Toolbox() {
   const [editMode, setEditMode] = useState(sceneSettings.edit.type);
   const [canvasVisible, setCanvasVisible] = useState(false);
   const [textures, setTextures] = useState<({ name: string, url: string, type: TextureType })[]>([]);
+  const [scenes, setScenes] = useState<string[]>(['None']);
   const [infoTable, setInfoTable] = useState<{ columns: any[], data: any[] }>({ columns: [], data: [] });
 
 
@@ -42,6 +44,14 @@ export default function Toolbox() {
 
     const current = sceneSettings.scene.logarithmicDepthBuffer;
     sceneSettings.scene.logarithmicDepthBuffer = !current;
+    window.location.reload();
+
+  }
+
+  function onSecondCameraToggle() {
+
+    const current = sceneSettings.scene.secondCamera;
+    sceneSettings.scene.secondCamera = !current;
     window.location.reload();
 
   }
@@ -73,7 +83,11 @@ export default function Toolbox() {
       }
       updateTextures();
 
-    })()
+      const scenes = await getAllScene();
+      scenes.unshift('None');
+      setScenes(scenes);
+
+    })();
 
     observe(() => {
       let _1 = sceneSettings.text.currentUserData;
@@ -221,6 +235,27 @@ export default function Toolbox() {
       </div>
 
       <div className='toolbox-outfolder'>
+        <div className='toolbox-outfolder-title'>Tiles Scene</div>
+        <div className='toolbox-folder'>
+          <span>Scene: </span>
+          <Select
+            size='small'
+            defaultValue={sceneSettings.action.selectScene}
+            style={{ width: '100%' }}
+            onChange={v => {
+              sceneSettings.action.selectScene = v
+            }}
+          >
+            {
+              scenes.map(s => {
+                return <Option value={s}>{s}</Option>
+              })
+            }
+          </Select>
+        </div>
+      </div>
+
+      <div className='toolbox-outfolder'>
         <div className='toolbox-outfolder-title'>Input/Output</div>
         <div className='toolbox-folder'>
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.importModel++}>Load Model</Button>
@@ -236,6 +271,9 @@ export default function Toolbox() {
         </div>
         <div className='toolbox-folder'>
           <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.saveTo3DTiles++}>Generate 3DTiles</Button>
+        </div>
+        <div className='toolbox-folder'>
+          <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.commitVersion++}>Commit Version</Button>
         </div>
       </div>
 
@@ -332,6 +370,19 @@ export default function Toolbox() {
             </div>
             <div className='toolbox-folder'>
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.global.simplification++}>Simplification</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.editBoundary++}>Edit Vertices</Button>
+            </div>
+            <div className='toolbox-folder'>
+              <span>Edit Mode</span>
+              <Select
+                size='small'
+                defaultValue={sceneSettings.edit.verticesEditMode} style={{ width: '60%' }} onChange={v => sceneSettings.edit.verticesEditMode = v}>
+                <Option value="edge">Edge</Option>
+                <Option value="vertical_edge">Vertical Edge</Option>
+                <Option value="vertex">Vertex</Option>
+              </Select>
             </div>
             <div className='toolbox-folder'>
               <Button size='small' style={{ width: '100%' }} onClick={e => sceneSettings.action.mergeGeometries++}>Merge Seleted</Button>
@@ -593,6 +644,12 @@ export default function Toolbox() {
           <span>Logarithmic ZBuffer</span>
           <Popconfirm placement="topLeft" title={'please note that this will cause page reload'} onConfirm={() => onBufferTypeChange()} okText="Yes" cancelText="No">
             <Switch checked={sceneSettings.scene.logarithmicDepthBuffer} size='small' />
+          </Popconfirm>
+        </div>
+        <div className='toolbox-folder'>
+          <span>Second Camera</span>
+          <Popconfirm placement="topLeft" title={'please note that this will cause page reload'} onConfirm={() => onSecondCameraToggle()} okText="Yes" cancelText="No">
+            <Switch checked={sceneSettings.scene.secondCamera} size='small' />
           </Popconfirm>
         </div>
         <div className='toolbox-folder'>

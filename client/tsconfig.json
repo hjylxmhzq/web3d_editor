@@ -19,9 +19,13 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "typeRoots": ["typings"],
+    "typeRoots": [
+      "typings"
+    ],
+    "preserveSymlinks": true
   },
   "include": [
-    "src", "typings"
+    "src",
+    "typings"
   ]
 }
