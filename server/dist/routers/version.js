@@ -33,6 +33,19 @@ router_1.default.post('/get_all_version', async (ctx, next) => {
     ctx.body = { versions };
     await next();
 });
+router_1.default.post('/merge_versions', async (ctx, next) => {
+    const sceneName = ctx.request.body.sceneName;
+    const versionLeft = ctx.request.body.versionLeft;
+    const versionRight = ctx.request.body.versionRight;
+    const versionMerge = ctx.request.body.versionMerge;
+    const tileset = ctx.request.body.tileset;
+    console.log(versionLeft, versionRight, versionMerge, tileset);
+    const tilesetFile = path_1.default.join(__dirname, '../../resources/3dtiles_scene', sceneName, `tileset_${versionMerge}.json`);
+    await fs_extra_1.default.writeFile(tilesetFile, tileset);
+    const result = await mergeVersions(sceneName, versionLeft, versionRight, versionMerge);
+    ctx.body = { sucess: result };
+    await next();
+});
 router_1.default.post('/get_all_scene', async (ctx, next) => {
     const sceneDir = path_1.default.join(__dirname, '../../resources/3dtiles_scene');
     const dirs = await fs_extra_1.default.readdir(sceneDir);
@@ -58,6 +71,30 @@ async function getVersionByScene(sceneName) {
         versions = JSON.parse((await fs_extra_1.default.readFile(versionFile)).toString());
     }
     return versions;
+}
+async function mergeVersions(currentScene, leftNode, rightNode, newNode) {
+    const versionFile = path_1.default.join(__dirname, '../../resources/3dtiles_scene', currentScene, 'versions.json');
+    const versions = await getVersionByScene(currentScene);
+    versions.nodes.push({
+        tagName: newNode,
+    });
+    const newVersionIndex = versions.nodes.length - 1;
+    const leftIndex = versions.nodes.findIndex(v => v.tagName === leftNode);
+    const rightIndex = versions.nodes.findIndex(v => v.tagName === rightNode);
+    if (leftIndex !== -1 && rightIndex !== -1) {
+        versions.links.push({
+            from: leftIndex,
+            to: newVersionIndex,
+        }, {
+            from: rightIndex,
+            to: newVersionIndex,
+        });
+        await fs_extra_1.default.writeFile(versionFile, JSON.stringify(versions, null, 2));
+        return true;
+    }
+    else {
+        return false;
+    }
 }
 async function updateVersionFile(currentScene, fromNode, toNode) {
     const versionFile = path_1.default.join(__dirname, '../../resources/3dtiles_scene', currentScene, 'versions.json');

@@ -759,7 +759,8 @@ class TransformControlsGizmo extends Object3D {
 			depthWrite: false,
 			fog: false,
 			toneMapped: false,
-			transparent: true
+			transparent: true,
+			wireframe: true,
 		});
 
 		const gizmoLineMaterial = new LineBasicMaterial({

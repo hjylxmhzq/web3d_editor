@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AmbientLight, AxesHelper, Color, CubeTextureLoader, DirectionalLight, DirectionalLightHelper, Group, Matrix4, OrthographicCamera, PCFSoftShadowMap, PerspectiveCamera, PointLight, PointLightHelper, Scene, sRGBEncoding, Vector3, WebGLRenderer } from 'three';
+import { AmbientLight, AxesHelper, Color, CubeTextureLoader, DirectionalLight, DirectionalLightHelper, Group, Light, Matrix4, OrthographicCamera, PCFSoftShadowMap, PerspectiveCamera, Plane, PointLight, PointLightHelper, Raycaster, Scene, sRGBEncoding, Vector2, Vector3, WebGLRenderer } from 'three';
 import { config } from '../../configs';
 import { useUpdate } from '../../hooks/common';
 import { FlyOrbitControls } from '../Scene/FlyOrbitControls';
-import Toolbar from '../Toolbar';
+import Toolbar from './components/Toolbar';
 import Toolbox from './components/Toolbox';
-import { scene } from './scene';
+import { renderEvent, scene } from './scene';
 import { observe, sceneSettings } from './settings';
-import { loadCubeTexture } from './utils/CubeTexture';
+import { loadCubeTexture } from './utils/materialUtils/CubeTexture';
 import './index.scss';
+import { customMouseEvent } from '../Scene/customMouseEvent';
 
+const _v3 = new Vector3();
+const _v2 = new Vector2();
 
 export default function GenComponnet() {
   const ref = useRef<HTMLDivElement>(null);
@@ -34,7 +37,7 @@ export default function GenComponnet() {
     >
       <Toolbar />
     </div>
-    <div style={{ position: 'absolute', width: '200px', right: 0, height: '100%', overflowY: 'auto' }}>
+    <div style={{ position: 'absolute', right: 0, height: '100%', overflowY: 'auto' }}>
       <Toolbox />
     </div>
     <div style={{
@@ -46,7 +49,9 @@ export default function GenComponnet() {
       textAlign: 'left',
       padding: '0 10px',
       backgroundColor: '#eee',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      zIndex: 999,
+      userSelect: 'none'
     }}>
       <span>
         {
@@ -54,7 +59,7 @@ export default function GenComponnet() {
         }
       </span>
     </div>
-    <div id="scene" ref={ref} style={{ width: '100%', height: '100vh' }}></div>
+    <div id="scene" ref={ref}></div>
   </div>
 }
 
@@ -72,7 +77,7 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   const ratio = window.innerWidth / window.innerHeight;
   const orcamRadius = 100
   // const camera = new OrthographicCamera(-orcamRadius * ratio, orcamRadius * ratio, orcamRadius, -orcamRadius, 0, 1000000);
-  const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
+  const camera = new PerspectiveCamera(75, el.clientWidth / el.clientHeight, 1, 10000);
 
   camera.position.set(50, 50, 50);
 
@@ -95,6 +100,12 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
   renderer.domElement.tabIndex = 1;
   el.appendChild(renderer.domElement);
 
+  window.addEventListener('resize', () => {
+    renderer.setSize(el.offsetWidth, el.offsetHeight);
+    camera.aspect = el.clientWidth / el.clientHeight;
+    camera.updateProjectionMatrix();
+  });
+
   let threeScene: SceneInfo = {
     scene,
     camera,
@@ -111,7 +122,7 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
     secondRenderer.shadowMap.type = PCFSoftShadowMap;
     secondRenderer.shadowMap.autoUpdate = true;
     secondRenderer.outputEncoding = sRGBEncoding;
-    secondRenderer.setSize(400, 300);
+    secondRenderer.setSize(600, 600);
     secondRenderer.setPixelRatio(window.devicePixelRatio);
     secondRenderer.domElement.style.position = 'absolute';
     secondRenderer.domElement.style.top = '0px';
@@ -151,11 +162,23 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
         : new PointLight(0xffffff, sceneSettings.scene.lightIntensity);
 
       lightHelper = light instanceof DirectionalLight ?
-        new DirectionalLightHelper(light, 10, new Color(0xaaaaaa))
-        : new PointLightHelper(light, 10, new Color(0xaaaaaa));
+        new DirectionalLightHelper(light, 10, new Color(0xffffff))
+        : new PointLightHelper(light, 10, new Color(0xffffff));
 
       light.castShadow = true;
 
+      if (light instanceof DirectionalLight) {
+
+        light.shadow.camera.top = sceneSettings.scene.shadowMapResolution / 100;
+        light.shadow.camera.bottom = -sceneSettings.scene.shadowMapResolution / 100;
+        light.shadow.camera.left = -sceneSettings.scene.shadowMapResolution / 100;
+        light.shadow.camera.right = sceneSettings.scene.shadowMapResolution / 100;
+        light.shadow.camera.near = 0.5;
+        light.shadow.camera.far = 5000;
+        light.shadow.camera.updateProjectionMatrix();
+
+      }
+      
       light.shadow.mapSize.width = sceneSettings.scene.shadowMapResolution;
       light.shadow.mapSize.height = sceneSettings.scene.shadowMapResolution;
 
@@ -164,23 +187,34 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
       lightGroup.clear();
       lightGroup.add(ambLight);
       lightGroup.add(light);
+      if (light instanceof DirectionalLight) {
+        lightGroup.add(light.target);
+      }
 
       lastLight = light;
       lastLightHelper = lightHelper;
+      console.log(lastLight);
     } else {
       light = lastLight;
       lightHelper = lastLightHelper;
     }
 
     const { lightAngle, lightDistance, lightIntensity, lightDirection, ambientLightIntensity, showLightHelper } = sceneSettings.scene;
-    const lightPos = lightPositionFromAngle(new Vector3(1, 0, 0), lightAngle, lightDirection);
+    const lightPos = sceneSettings.scene.lightAlwaysCenter && light instanceof PointLight ?
+      new Vector3(0, 1, 0)
+      : lightPositionFromAngle(new Vector3(1, 0, 0), lightAngle, lightDirection)
     light.position.copy(lightPos).multiplyScalar(lightDistance);
     light.intensity = lightIntensity;
+
     ambLight.intensity = ambientLightIntensity;
     if (light instanceof PointLight) {
       light.distance = lightDistance * 2;
-    } else {
-      light.lookAt(0, 0, 0);
+    } else if (light) {
+      light.shadow.updateMatrices(light);
+    }
+
+    if (sceneSettings.scene.lightAlwaysCenter) {
+      // updateLightPosByCamera(light, camera);
     }
 
     if (showLightHelper) {
@@ -210,6 +244,54 @@ function setupThreeJs(el: HTMLDivElement): SceneInfo {
     }
 
   }
+
+  const xzPlane = new Plane();
+  xzPlane.setFromNormalAndCoplanarPoint(new Vector3(0, 1, 0), new Vector3(0, 0, 0));
+  const raycaster = new Raycaster();
+
+  const cameraIntersection = new Vector3();
+  const lightIntersection = new Vector3();
+  const cameraWorldPos = new Vector3();
+  const cameraWorldDir = new Vector3();
+  function updateLightPosByCamera(light: Light, camera: PerspectiveCamera) {
+
+      raycaster.set(
+        camera.getWorldPosition(cameraWorldPos),
+        camera.getWorldDirection(cameraWorldDir)
+      );
+
+      raycaster.ray.intersectPlane(xzPlane, cameraIntersection);
+
+      raycaster.set(
+        light.position,
+        light.shadow.camera.getWorldDirection(cameraWorldDir)
+      );
+
+      raycaster.ray.intersectPlane(xzPlane, lightIntersection);
+      const offset = cameraIntersection.sub(lightIntersection);
+
+      light.position.x += offset.x;
+      light.position.z += offset.z;
+      if (light instanceof DirectionalLight) {
+        light.target.position.x += offset.x;
+        light.target.position.z += offset.z;
+        light.setRotationFromQuaternion(light.shadow.camera.quaternion);
+        light.rotateX(0.5 * Math.PI);
+      }
+
+  }
+
+  renderEvent.on('render', () => {
+
+    if (sceneSettings.scene.lightAlwaysCenter) {
+
+      if (lastLight) {
+        updateLightPosByCamera(lastLight, camera);
+      }
+
+    }
+
+  });
 
   const lightGroup = new Group();
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import './App.scss';
 import Scene from './components/Scene';
-import TilesGen from './components/editor';
+import TilesGen from './components/Editor';
 
 function App() {
 

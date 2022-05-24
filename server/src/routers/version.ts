@@ -56,6 +56,26 @@ router.post('/get_all_version', async (ctx, next) => {
 
 });
 
+router.post('/merge_versions', async (ctx, next) => {
+
+    const sceneName = ctx.request.body.sceneName;
+    const versionLeft = ctx.request.body.versionLeft;
+    const versionRight = ctx.request.body.versionRight;
+    const versionMerge = ctx.request.body.versionMerge;
+    const tileset = ctx.request.body.tileset;
+    
+    console.log(versionLeft, versionRight, versionMerge, tileset);
+
+    const tilesetFile = path.join(__dirname, '../../resources/3dtiles_scene', sceneName, `tileset_${versionMerge}.json`);
+    await fs.writeFile(tilesetFile, tileset);
+    const result = await mergeVersions(sceneName, versionLeft, versionRight, versionMerge);
+
+    ctx.body = { sucess: result };
+
+    await next();
+
+});
+
 router.post('/get_all_scene', async (ctx, next) => {
 
     const sceneDir = path.join(__dirname, '../../resources/3dtiles_scene');
@@ -88,6 +108,44 @@ async function getVersionByScene(sceneName: string) {
     }
 
     return versions;
+
+}
+
+async function mergeVersions(currentScene: string, leftNode: string, rightNode: string, newNode: string) {
+
+
+    const versionFile = path.join(__dirname, '../../resources/3dtiles_scene', currentScene, 'versions.json');
+
+    const versions = await getVersionByScene(currentScene);
+
+    versions.nodes.push({
+        tagName: newNode,
+    });
+
+    const newVersionIndex = versions.nodes.length - 1;
+
+    const leftIndex = versions.nodes.findIndex(v => v.tagName === leftNode);
+    const rightIndex = versions.nodes.findIndex(v => v.tagName === rightNode);
+
+    if (leftIndex !== -1 && rightIndex !== -1) {
+
+        versions.links.push({
+            from: leftIndex,
+            to: newVersionIndex,
+        }, {
+            from: rightIndex,
+            to: newVersionIndex,
+        });
+
+        await fs.writeFile(versionFile, JSON.stringify(versions, null, 2));
+
+        return true;
+
+    } else {
+
+        return false;
+
+    }
 
 }
 

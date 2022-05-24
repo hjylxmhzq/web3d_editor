@@ -1,6 +1,36 @@
 .toolbox-container {
-    width: 100%;
+    width: 200px;
     height: 100%;
+    position: relative;
+    top: 110px;
+}
+
+.toolbox-container-top {
+    z-index: 999;
+    width: 100%;
+    height: 110px;
+    right: 0;
+    top: 0;
+    position: fixed;
+    background-color: #eee;
+    box-shadow: 1px 1px 13px 6px #69696938;
+    text-align: left;
+    white-space: nowrap;
+    overflow: visible;
+    & > div {
+        &::-webkit-scrollbar {
+            display: none;
+        }
+
+        padding: 5px;
+        overflow: auto;
+
+        & > div {
+            display: inline-block;
+            vertical-align: top;
+            text-align: center;
+        }
+    }
 }
 
 .toolbox-title {
@@ -22,6 +52,34 @@
     width: 100%;
     align-items: center;
     flex-wrap: wrap;
+}
+
+.toolbox-top-folder {
+    margin: 1px 0;
+    text-align: center;
+    display: flex;
+    justify-content: space-between;
+    background-color: #eee;
+    width: 120px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.toolbox-top-outfolder {
+    z-index: 999;
+    transition: all 0.2s;
+    box-shadow: 1px 1px 7px 0 #9b97978c;
+    background-color: #eee;
+    padding: 1px 5px;
+    margin: 1px 2px;
+    overflow: hidden;
+    max-height: 96px;
+    &:hover {
+        max-height: 220px;
+    }
+    &:focus-within {
+        max-height: 220px;
+    }
 }
 
 .toolbox-outfolder-title {

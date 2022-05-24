@@ -9,15 +9,15 @@ enum CUSTOM_MOUSE_EVENT {
   drag = 'drag',
 }
 
-class CustomMouseEvent {
+export class CustomMouseEvent {
   cbs: Record<string, ((e: MouseEvent, ...rest: any[]) => void)[]> = {};
   public mousedown = false;
   public mouseLeftDown = false;
   public mouseRightDown = false;
-  constructor() {
+  constructor(public el: HTMLElement = document.documentElement) {
     let mouseX = -1;
     let mouseY = -1;
-    window.addEventListener('mousedown', (e) => {
+    el.addEventListener('mousedown', (e) => {
       const cbs = this.cbs[CUSTOM_MOUSE_EVENT.clickNoMove];
       if (!cbs) return;
       mouseX = e.clientX;
@@ -29,7 +29,7 @@ class CustomMouseEvent {
         this.mouseRightDown = true;
       }
     }, false);
-    window.addEventListener('mousemove', (e) => {
+    el.addEventListener('mousemove', (e) => {
 
       const cbs = this.cbs[CUSTOM_MOUSE_EVENT.move];
 
@@ -42,7 +42,7 @@ class CustomMouseEvent {
       }
 
     }, false);
-    window.addEventListener('mouseup', (e) => {
+    el.addEventListener('mouseup', (e) => {
       if (this.mousedown && e.clientX === mouseX && e.clientY === mouseY) {
         const cbs = this.cbs[CUSTOM_MOUSE_EVENT.clickNoMove];
         if (!cbs) return;
@@ -63,13 +63,13 @@ class CustomMouseEvent {
     });
   }
   onKey(key: string, onKeyDownCb: (e: KeyboardEvent) => void, onKeyUpCb?: (e: KeyboardEvent) => void) {
-    window.addEventListener('keydown', (e) => {
+    this.el.addEventListener('keydown', (e) => {
       if (e.key === key) {
         onKeyDownCb(e);
       }
     });
     if (onKeyUpCb) {
-      window.addEventListener('keyup', (e) => {
+      this.el.addEventListener('keyup', (e) => {
         if (e.key === key) {
           onKeyUpCb(e);
         }
@@ -77,10 +77,10 @@ class CustomMouseEvent {
     }
   }
   onMouseDown(cb: (e: MouseEvent) => void ) {
-    window.addEventListener('mousedown', cb);
+    this.el.addEventListener('mousedown', cb);
   }
   onMouseUp(cb: (e: MouseEvent) => void ) {
-    window.addEventListener('mouseup', cb);
+    this.el.addEventListener('mouseup', cb);
   }
   onMouseDrag(cb: (e: MouseEvent, startPos: MousePosition) => void) {
     if (this.cbs[CUSTOM_MOUSE_EVENT.drag]) {

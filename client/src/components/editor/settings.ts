@@ -1,3 +1,4 @@
+import { Matrix4 } from "three";
 
 type Watcher = (oldValue: any, newValue: any) => void;
 
@@ -130,6 +131,7 @@ const sceneSettings = {
     edit: {
         type: 'sculpt',
         simpleSubdivision: false,
+        simplificationVerticesCount: 500,
         verticesEditMode: 'edge',
     },
     transform: {
@@ -163,6 +165,7 @@ const sceneSettings = {
         deleteGeometry: 1,
         mergeGeometries: 1,
         unionGeometries: 1,
+        subtractGeometries: 1,
         intersectGeometries: 1,
         extractFaces: 1,
         dulplicateMesh: 1,
@@ -173,12 +176,20 @@ const sceneSettings = {
         applyEnvMap: 1,
         convertToPBRMaterial: 1,
         commitVersion: 1,
-        selectScene: '',
+        selectScene: 'None',
         updateVersions: 1,
+        mergeVersions: '',
         editBoundary: 1,
+        highlightEdges: 1,
+        saveCameraPosition: 1,
+        restoreCameraPosition: 1,
+        recalFlatUV: 1,
+        computeVertexNormal: 1,
     },
     scene: {
-        secondCamera: true,
+        secondCamera: false,
+        lightAlwaysCenter: false,
+        secondCameraWidth: 2000,
         castShadow: true,
         shadowMapResolution: 2048,
         showAxisHelper: false,
@@ -191,8 +202,12 @@ const sceneSettings = {
         backgroundColor: 0xffffff,
         liveSelect: false,
         directionLight: true,
-        baseMapCenterLng: -74.00516319107578,
+        baseMapCenterLng: -74.00516319107578, // new york
         baseMapCenterLat: 40.71124243527472,
+        // baseMapCenterLng: 113.829048, // luogang
+        // baseMapCenterLat: 23.242929,
+        // baseMapCenterLng: 113.3220751, // tianhe
+        // baseMapCenterLat: 23.123913,
         baseMapZoomLevel: 18,
         baseMapBrightness: 0.5,
         showBaseMap: false,
@@ -200,11 +215,14 @@ const sceneSettings = {
         cubeTextureName: 'beach',
         logarithmicDepthBuffer: false,
         currentTileVersion: '',
+        savedCameraMatrix: new Matrix4().toArray(),
     },
     text: {
         loading: -1,
         loadingText: '',
-        bottomBar: `'T': translation; 'G': scale; 'R': rotation; 'WASD': move; 'Alt': range selection`,
+        bottomBar: `'T': translation; 'G': scale; 'R': rotation; 'WASD': move; 'Alt': box selection`,
+        currentMeshFaces: 0,
+        currentMeshVertices: 0,
         currentUserData: {
 
         }
